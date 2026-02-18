@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useAuditStore } from '../stores/auditStore'
 import { useBranchStore } from '../stores/branchStore'
 import { format } from 'date-fns'
@@ -48,7 +48,7 @@ const ACTION_COLORS = {
 }
 
 export default function AuditLog() {
-  const { logs, loading, totalCount, fetchLogs } = useAuditStore()
+  const { logs, totalCount, fetchLogs } = useAuditStore()
   const { branches, selectedBranchId } = useBranchStore()
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState({
@@ -59,19 +59,29 @@ export default function AuditLog() {
     endDate: '',
   })
   const [selectedLog, setSelectedLog] = useState(null)
+  const [loading, setLoading] = useState(true)
   const limit = 50
 
-  useEffect(() => {
-    fetchLogs({
-      page,
-      limit,
-      entityType: filters.entityType || null,
-      action: filters.action || null,
-      branchId: filters.branchId || null,
-      startDate: filters.startDate || null,
-      endDate: filters.endDate || null,
-    })
+  const loadLogs = useCallback(async () => {
+    setLoading(true)
+    try {
+      await fetchLogs({
+        page,
+        limit,
+        entityType: filters.entityType || null,
+        action: filters.action || null,
+        branchId: filters.branchId || null,
+        startDate: filters.startDate || null,
+        endDate: filters.endDate || null,
+      })
+    } finally {
+      setLoading(false)
+    }
   }, [page, filters])
+
+  useEffect(() => {
+    loadLogs()
+  }, [loadLogs])
 
   const totalPages = Math.ceil(totalCount / limit)
 

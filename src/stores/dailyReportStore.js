@@ -40,12 +40,14 @@ export const useDailyReportStore = create((set, get) => ({
       }
 
       set({ currentReport: data })
+      // Load related data
       await get().fetchRelatedData(data.id)
-      set({ loading: false })
       return data
     } catch (error) {
-      set({ error: error.message, loading: false })
+      set({ error: error.message })
       return null
+    } finally {
+      set({ loading: false })
     }
   },
 
@@ -62,9 +64,11 @@ export const useDailyReportStore = create((set, get) => ({
 
       const { data, error } = await query
       if (error) throw error
-      set({ reports: data, loading: false })
+      set({ reports: data })
     } catch (error) {
-      set({ error: error.message, loading: false })
+      set({ error: error.message })
+    } finally {
+      set({ loading: false })
     }
   },
 

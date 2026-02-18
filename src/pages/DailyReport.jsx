@@ -40,7 +40,7 @@ export default function DailyReport() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
   const { selectedBranchId, initialized } = useBranchStore()
   const [reportDate, setReportDate] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [cashSales, setCashSales] = useState([])
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [productSales, setProductSales] = useState([])
@@ -50,30 +50,25 @@ export default function DailyReport() {
 
   const fetchData = async () => {
     setLoading(true)
-    try {
-      const start = reportDate + 'T00:00:00'
-      const end = reportDate + 'T23:59:59'
+    const start = reportDate + 'T00:00:00'
+    const end = reportDate + 'T23:59:59'
 
-      let salesQ = supabase.from('cash_sales').select('*, fuel_types(short_code, name), cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
-      let poQ = supabase.from('purchase_orders').select('*, fuel_types(short_code, name), cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
-      let prodQ = supabase.from('product_sales').select('*, cashiers:cashier_id(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
+    let salesQ = supabase.from('cash_sales').select('*, fuel_types(short_code, name), cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
+    if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
+    const { data: sales } = await salesQ
 
-      if (selectedBranchId) {
-        salesQ = salesQ.eq('branch_id', selectedBranchId)
-        poQ = poQ.eq('branch_id', selectedBranchId)
-        prodQ = prodQ.eq('branch_id', selectedBranchId)
-      }
+    let poQ = supabase.from('purchase_orders').select('*, fuel_types(short_code, name), cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
+    if (selectedBranchId) poQ = poQ.eq('branch_id', selectedBranchId)
+    const { data: pos } = await poQ
 
-      const [salesRes, poRes, prodRes] = await Promise.all([salesQ, poQ, prodQ])
+    let prodQ = supabase.from('product_sales').select('*, cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
+    if (selectedBranchId) prodQ = prodQ.eq('branch_id', selectedBranchId)
+    const { data: prods } = await prodQ
 
-      setCashSales(salesRes.data || [])
-      setPurchaseOrders(poRes.data || [])
-      setProductSales(prodRes.data || [])
-    } catch (err) {
-      console.error('DailyReport fetch error:', err)
-    } finally {
-      setLoading(false)
-    }
+    setCashSales(sales || [])
+    setPurchaseOrders(pos || [])
+    setProductSales(prods || [])
+    setLoading(false)
   }
 
   useEffect(() => { fetchFuelTypes() }, [])

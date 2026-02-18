@@ -7,7 +7,7 @@ import { format, subDays, parseISO, differenceInMinutes } from 'date-fns'
 export default function Attendance() {
   const { selectedBranchId, initialized } = useBranchStore()
   const [records, setRecords] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 7), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [filterCashier, setFilterCashier] = useState('')

@@ -7,8 +7,7 @@ export const useCustomerStore = create((set, get) => ({
   error: null,
 
   fetchCustomers: async () => {
-    if (get()._fetching) return
-    set({ _fetching: true, loading: true })
+    set({ loading: true })
     try {
       const { data, error } = await supabase
         .from('customers')
@@ -16,9 +15,11 @@ export const useCustomerStore = create((set, get) => ({
         .eq('is_active', true)
         .order('name')
       if (error) throw error
-      set({ customers: data, loading: false, _fetching: false, error: null })
+      set({ customers: data })
     } catch (error) {
-      set({ error: error.message, loading: false, _fetching: false })
+      set({ error: error.message })
+    } finally {
+      set({ loading: false })
     }
   },
 

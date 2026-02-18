@@ -8,7 +8,7 @@ import { logAudit } from '../stores/auditStore'
 
 export default function QRManagement() {
   const [cashiers, setCashiers] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ full_name: '', branch_id: '' })
   const [selectedCashier, setSelectedCashier] = useState(null)
@@ -20,19 +20,14 @@ export default function QRManagement() {
 
   const fetchCashiers = async () => {
     setLoading(true)
-    try {
-      let query = supabase
-        .from('cashiers')
-        .select('*, branches(name)')
-        .order('created_at', { ascending: false })
-      if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
-      const { data } = await query
-      setCashiers(data || [])
-    } catch (err) {
-      console.error('QR fetch error:', err)
-    } finally {
-      setLoading(false)
-    }
+    let query = supabase
+      .from('cashiers')
+      .select('*, branches(name)')
+      .order('created_at', { ascending: false })
+    if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
+    const { data } = await query
+    setCashiers(data || [])
+    setLoading(false)
   }
 
   const handleCreate = async (e) => {

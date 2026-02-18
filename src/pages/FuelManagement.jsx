@@ -11,11 +11,15 @@ export default function FuelManagement() {
   const { adminProfile: profile } = useAuthStore()
   const [editPrices, setEditPrices] = useState({})
   const [priceHistory, setPriceHistory] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchFuelTypes()
-    fetchPriceHistory()
+    const load = async () => {
+      setLoading(true)
+      await Promise.all([fetchFuelTypes(), fetchPriceHistory()])
+      setLoading(false)
+    }
+    load()
   }, [])
 
   useEffect(() => {

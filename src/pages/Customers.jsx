@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCustomerStore } from '../stores/customerStore'
+import { useFetch } from '../hooks/useFetch'
 import { supabase } from '../lib/supabase'
 import { Users, Plus, Search, Edit2, X, Save, ChevronDown, ChevronUp, Check, Clock, RefreshCw, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
@@ -7,7 +8,7 @@ import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
 
 export default function Customers() {
-  const { customers, fetchCustomers, addCustomer, updateCustomer, deleteCustomer, loading } = useCustomerStore()
+  const { customers, fetchCustomers, addCustomer, updateCustomer, deleteCustomer } = useCustomerStore()
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
@@ -20,10 +21,10 @@ export default function Customers() {
   const [poCustomers, setPoCustomers] = useState([])
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { 
-    fetchCustomers()
-    fetchPOCustomers()
-  }, [])
+  const { loading, refresh } = useFetch(async () => {
+    await fetchCustomers()
+    await fetchPOCustomers()
+  })
 
   // Fetch unique customers from purchase_orders
   const fetchPOCustomers = async () => {
@@ -163,7 +164,7 @@ export default function Customers() {
           <p className="text-gray-500 text-sm">Manage charge account customers</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => { fetchCustomers(); fetchPOCustomers() }} disabled={loading}
+          <button onClick={refresh} disabled={loading}
             className="flex items-center gap-2 px-3 py-2.5 text-gray-500 hover:text-blue-600 transition-colors disabled:opacity-50">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>

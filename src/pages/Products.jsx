@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useProductStore } from '../stores/productStore'
+import { useFetch } from '../hooks/useFetch'
 import { Package, Plus, Search, Edit2, X, Save, AlertTriangle, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
@@ -12,7 +13,8 @@ const CATEGORIES = [
 ]
 
 export default function Products() {
-  const { products, fetchProducts, addProduct, updateProduct, loading } = useProductStore()
+  const { products, fetchProducts, addProduct, updateProduct } = useProductStore()
+  const { loading, refresh } = useFetch(() => fetchProducts())
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -21,8 +23,6 @@ export default function Products() {
     name: '', category: 'oil_lubes', sku: '', price: 0, cost: 0, stock_quantity: 0, reorder_level: 5
   })
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => { fetchProducts() }, [])
 
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -83,7 +83,7 @@ export default function Products() {
           <p className="text-gray-500 text-sm">Oil, lubes, accessories, and services</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => fetchProducts()} disabled={loading}
+          <button onClick={refresh} disabled={loading}
             className="flex items-center gap-2 px-3 py-2.5 text-gray-500 hover:text-blue-600 transition-colors disabled:opacity-50">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>

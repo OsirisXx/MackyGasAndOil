@@ -7,7 +7,7 @@ import { format, subDays } from 'date-fns'
 export default function ChargeInvoices() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
   const [invoices, setInvoices] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))

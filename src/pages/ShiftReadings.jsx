@@ -10,20 +10,11 @@ import {
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
 
-const FALLBACK_SHIFTS = [
-  { shift_number: 1, label: 'Shift 1', start_time: '06:00', end_time: '14:00' },
-  { shift_number: 2, label: 'Shift 2', start_time: '14:00', end_time: '22:00' },
-  { shift_number: 3, label: 'Shift 3', start_time: '22:00', end_time: '06:00' },
+const SHIFTS = [
+  { number: 1, label: 'Shift 1', time: '6:00 AM - 2:00 PM' },
+  { number: 2, label: 'Shift 2', time: '2:00 PM - 10:00 PM' },
+  { number: 3, label: 'Shift 3', time: '10:00 PM - 6:00 AM' },
 ]
-
-const formatTime12 = (t) => {
-  if (!t) return ''
-  const [h, m] = t.split(':')
-  const hour = parseInt(h)
-  const ampm = hour >= 12 ? 'PM' : 'AM'
-  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
-  return `${h12}:${m} ${ampm}`
-}
 
 export default function ShiftReadings() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
@@ -31,66 +22,44 @@ export default function ShiftReadings() {
   const [shiftDate, setShiftDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [selectedShift, setSelectedShift] = useState(1)
   const [readings, setReadings] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editForm, setEditForm] = useState({})
   const [unlockedReadings, setUnlockedReadings] = useState(new Set())
-  const [shifts, setShifts] = useState(FALLBACK_SHIFTS)
 
   useEffect(() => { fetchFuelTypes() }, [])
-
-  useEffect(() => {
-    const fetchShifts = async () => {
-      if (!selectedBranchId) { setShifts(FALLBACK_SHIFTS); return }
-      const { data } = await supabase
-        .from('branch_shifts').select('*')
-        .eq('branch_id', selectedBranchId).eq('is_active', true)
-        .order('shift_number')
-      if (data && data.length > 0) {
-        setShifts(data)
-        if (!data.find(s => s.shift_number === selectedShift)) setSelectedShift(data[0].shift_number)
-      } else { setShifts(FALLBACK_SHIFTS) }
-    }
-    if (initialized) fetchShifts()
-  }, [selectedBranchId, initialized])
-
   useEffect(() => { if (initialized) fetchReadings() }, [shiftDate, selectedShift, selectedBranchId, initialized])
 
   const fetchReadings = async () => {
     setLoading(true)
-    try {
-      let query = supabase
-        .from('shift_fuel_readings')
-        .select('*, fuel_types(name, short_code, current_price), cashiers(full_name)')
-        .eq('shift_date', shiftDate)
-        .eq('shift_number', selectedShift)
-        .order('created_at')
-      
-      if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
-      
-      const { data, error } = await query
-      if (error) {
-        console.warn('shift_fuel_readings table may not exist:', error.message)
-        setReadings([])
-      } else {
-        setReadings(data || [])
-        const form = {}
-        data?.forEach(r => {
-          form[r.fuel_type_id] = {
-            beginning_reading: r.beginning_reading || '',
-            ending_reading: r.ending_reading || '',
-            adjustment_liters: r.adjustment_liters || 0,
-            adjustment_reason: r.adjustment_reason || '',
-          }
-        })
-        setEditForm(form)
-      }
-    } catch (err) {
-      console.error('ShiftReadings fetch error:', err)
+    let query = supabase
+      .from('shift_fuel_readings')
+      .select('*, fuel_types(name, short_code, current_price), cashiers(full_name)')
+      .eq('shift_date', shiftDate)
+      .eq('shift_number', selectedShift)
+      .order('created_at')
+    
+    if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
+    
+    const { data, error } = await query
+    if (error) {
+      console.warn('shift_fuel_readings table may not exist:', error.message)
       setReadings([])
-    } finally {
-      setLoading(false)
+    } else {
+      setReadings(data || [])
+      // Initialize edit form with existing data
+      const form = {}
+      data?.forEach(r => {
+        form[r.fuel_type_id] = {
+          beginning_reading: r.beginning_reading || '',
+          ending_reading: r.ending_reading || '',
+          adjustment_liters: r.adjustment_liters || 0,
+          adjustment_reason: r.adjustment_reason || '',
+        }
+      })
+      setEditForm(form)
     }
+    setLoading(false)
   }
 
   const getReadingForFuel = (fuelId) => readings.find(r => r.fuel_type_id === fuelId)
@@ -289,11 +258,11 @@ export default function ShiftReadings() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Shift</label>
             <div className="flex gap-1">
-              {shifts.map(s => (
-                <button key={s.shift_number}
-                  onClick={() => setSelectedShift(s.shift_number)}
+              {SHIFTS.map(s => (
+                <button key={s.number}
+                  onClick={() => setSelectedShift(s.number)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    selectedShift === s.shift_number 
+                    selectedShift === s.number 
                       ? 'bg-blue-600 text-white' 
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}>
@@ -303,7 +272,7 @@ export default function ShiftReadings() {
             </div>
           </div>
           <div className="text-xs text-gray-400">
-            {(() => { const s = shifts.find(s => s.shift_number === selectedShift); return s ? `${formatTime12(s.start_time)} - ${formatTime12(s.end_time)}` : '' })()}
+            {SHIFTS.find(s => s.number === selectedShift)?.time}
           </div>
         </div>
       </div>

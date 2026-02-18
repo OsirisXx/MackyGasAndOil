@@ -11,7 +11,7 @@ export default function PurchaseOrders() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
   const { selectedBranchId, initialized } = useBranchStore()
   const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'))

@@ -18,7 +18,7 @@ export const useBranchStore = create(
           if (!get().initialized) set({ initialized: true })
           return
         }
-        if (get().loading) return // Already fetching
+        // Removed loading guard — it was silently dropping fetch calls during navigation
         
         set({ loading: true })
         try {

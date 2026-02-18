@@ -6,7 +6,7 @@ import { format, subDays } from 'date-fns'
 export default function Expenses() {
   const [expenses, setExpenses] = useState([])
   const [purchases, setPurchases] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('expenses')
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -15,26 +15,21 @@ export default function Expenses() {
 
   const fetchData = async () => {
     setLoading(true)
-    try {
-      const [expRes, purRes] = await Promise.all([
-        supabase.from('expenses')
-          .select('*, daily_reports(report_date)')
-          .gte('created_at', startDate + 'T00:00:00')
-          .lte('created_at', endDate + 'T23:59:59')
-          .order('created_at', { ascending: false }),
-        supabase.from('purchases_disbursements')
-          .select('*, daily_reports(report_date)')
-          .gte('created_at', startDate + 'T00:00:00')
-          .lte('created_at', endDate + 'T23:59:59')
-          .order('created_at', { ascending: false }),
-      ])
-      if (!expRes.error) setExpenses(expRes.data || [])
-      if (!purRes.error) setPurchases(purRes.data || [])
-    } catch (err) {
-      console.error('Expenses fetch error:', err)
-    } finally {
-      setLoading(false)
-    }
+    const [expRes, purRes] = await Promise.all([
+      supabase.from('expenses')
+        .select('*, daily_reports(report_date)')
+        .gte('created_at', startDate + 'T00:00:00')
+        .lte('created_at', endDate + 'T23:59:59')
+        .order('created_at', { ascending: false }),
+      supabase.from('purchases_disbursements')
+        .select('*, daily_reports(report_date)')
+        .gte('created_at', startDate + 'T00:00:00')
+        .lte('created_at', endDate + 'T23:59:59')
+        .order('created_at', { ascending: false }),
+    ])
+    if (!expRes.error) setExpenses(expRes.data || [])
+    if (!purRes.error) setPurchases(purRes.data || [])
+    setLoading(false)
   }
 
   const totalExpenses = expenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0)
