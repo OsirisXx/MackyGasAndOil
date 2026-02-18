@@ -20,14 +20,19 @@ export default function QRManagement() {
 
   const fetchCashiers = async () => {
     setLoading(true)
-    let query = supabase
-      .from('cashiers')
-      .select('*, branches(name)')
-      .order('created_at', { ascending: false })
-    if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
-    const { data } = await query
-    setCashiers(data || [])
-    setLoading(false)
+    try {
+      let query = supabase
+        .from('cashiers')
+        .select('*, branches(name)')
+        .order('created_at', { ascending: false })
+      if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
+      const { data } = await query
+      setCashiers(data || [])
+    } catch (err) {
+      console.error('QR fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleCreate = async (e) => {

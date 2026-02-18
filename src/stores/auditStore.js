@@ -73,12 +73,10 @@ export const useAuditStore = create((set, get) => ({
 
       const { data, count, error } = await query
       if (error) throw error
-      set({ logs: data || [], totalCount: count || 0 })
+      set({ logs: data || [], totalCount: count || 0, loading: false })
     } catch (e) {
       console.error('Failed to fetch audit logs:', e)
-      set({ logs: [] })
-    } finally {
-      set({ loading: false })
+      set({ logs: [], loading: false })
     }
   },
 }))

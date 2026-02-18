@@ -35,80 +35,44 @@ export default function AccountabilityReport() {
 
   const fetchAllData = async () => {
     setLoading(true)
-    const start = reportDate + 'T00:00:00'
-    const end = reportDate + 'T23:59:59'
+    try {
+      const start = reportDate + 'T00:00:00'
+      const end = reportDate + 'T23:59:59'
 
-    // Fuel readings
-    let readingsQ = supabase
-      .from('shift_fuel_readings')
-      .select('*, fuel_types(name, short_code)')
-      .eq('shift_date', reportDate)
-      .eq('shift_number', selectedShift)
-    if (selectedBranchId) readingsQ = readingsQ.eq('branch_id', selectedBranchId)
-    const { data: readings } = await readingsQ
+      let readingsQ = supabase.from('shift_fuel_readings').select('*, fuel_types(name, short_code)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      let salesQ = supabase.from('cash_sales').select('*').gte('created_at', start).lte('created_at', end)
+      let ciQ = supabase.from('purchase_orders').select('*, fuel_types(short_code), cashiers(full_name)').gte('created_at', start).lte('created_at', end)
+      let depQ = supabase.from('deposits').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      let chkQ = supabase.from('checks').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      let expQ = supabase.from('expenses').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      let purQ = supabase.from('purchases_disbursements').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
 
-    // Cash sales (for product categories)
-    let salesQ = supabase
-      .from('cash_sales')
-      .select('*')
-      .gte('created_at', start)
-      .lte('created_at', end)
-    if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
-    const { data: sales } = await salesQ
+      if (selectedBranchId) {
+        readingsQ = readingsQ.eq('branch_id', selectedBranchId)
+        salesQ = salesQ.eq('branch_id', selectedBranchId)
+        ciQ = ciQ.eq('branch_id', selectedBranchId)
+        depQ = depQ.eq('branch_id', selectedBranchId)
+        chkQ = chkQ.eq('branch_id', selectedBranchId)
+        expQ = expQ.eq('branch_id', selectedBranchId)
+        purQ = purQ.eq('branch_id', selectedBranchId)
+      }
 
-    // Charge invoices (Purchase Orders are the same as Charge Invoices)
-    let ciQ = supabase
-      .from('purchase_orders')
-      .select('*, fuel_types(short_code), cashiers(full_name)')
-      .gte('created_at', start)
-      .lte('created_at', end)
-    if (selectedBranchId) ciQ = ciQ.eq('branch_id', selectedBranchId)
-    const { data: ci } = await ciQ
+      const [readingsRes, salesRes, ciRes, depRes, chkRes, expRes, purRes] = await Promise.all([
+        readingsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ
+      ])
 
-    // Deposits
-    let depQ = supabase
-      .from('deposits')
-      .select('*')
-      .eq('shift_date', reportDate)
-      .eq('shift_number', selectedShift)
-    if (selectedBranchId) depQ = depQ.eq('branch_id', selectedBranchId)
-    const { data: dep } = await depQ
-
-    // Checks
-    let chkQ = supabase
-      .from('checks')
-      .select('*')
-      .eq('shift_date', reportDate)
-      .eq('shift_number', selectedShift)
-    if (selectedBranchId) chkQ = chkQ.eq('branch_id', selectedBranchId)
-    const { data: chk } = await chkQ
-
-    // Expenses
-    let expQ = supabase
-      .from('expenses')
-      .select('*')
-      .eq('shift_date', reportDate)
-      .eq('shift_number', selectedShift)
-    if (selectedBranchId) expQ = expQ.eq('branch_id', selectedBranchId)
-    const { data: exp } = await expQ
-
-    // Purchases/Disbursements
-    let purQ = supabase
-      .from('purchases_disbursements')
-      .select('*')
-      .eq('shift_date', reportDate)
-      .eq('shift_number', selectedShift)
-    if (selectedBranchId) purQ = purQ.eq('branch_id', selectedBranchId)
-    const { data: pur } = await purQ
-
-    setFuelReadings(readings || [])
-    setCashSales(sales || [])
-    setChargeInvoices(ci || [])
-    setDeposits(dep || [])
-    setChecks(chk || [])
-    setExpenses(exp || [])
-    setPurchases(pur || [])
-    setLoading(false)
+      setFuelReadings(readingsRes.data || [])
+      setCashSales(salesRes.data || [])
+      setChargeInvoices(ciRes.data || [])
+      setDeposits(depRes.data || [])
+      setChecks(chkRes.data || [])
+      setExpenses(expRes.data || [])
+      setPurchases(purRes.data || [])
+    } catch (err) {
+      console.error('AccountabilityReport fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Calculate totals

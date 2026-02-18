@@ -15,21 +15,26 @@ export default function Expenses() {
 
   const fetchData = async () => {
     setLoading(true)
-    const [expRes, purRes] = await Promise.all([
-      supabase.from('expenses')
-        .select('*, daily_reports(report_date)')
-        .gte('created_at', startDate + 'T00:00:00')
-        .lte('created_at', endDate + 'T23:59:59')
-        .order('created_at', { ascending: false }),
-      supabase.from('purchases_disbursements')
-        .select('*, daily_reports(report_date)')
-        .gte('created_at', startDate + 'T00:00:00')
-        .lte('created_at', endDate + 'T23:59:59')
-        .order('created_at', { ascending: false }),
-    ])
-    if (!expRes.error) setExpenses(expRes.data || [])
-    if (!purRes.error) setPurchases(purRes.data || [])
-    setLoading(false)
+    try {
+      const [expRes, purRes] = await Promise.all([
+        supabase.from('expenses')
+          .select('*, daily_reports(report_date)')
+          .gte('created_at', startDate + 'T00:00:00')
+          .lte('created_at', endDate + 'T23:59:59')
+          .order('created_at', { ascending: false }),
+        supabase.from('purchases_disbursements')
+          .select('*, daily_reports(report_date)')
+          .gte('created_at', startDate + 'T00:00:00')
+          .lte('created_at', endDate + 'T23:59:59')
+          .order('created_at', { ascending: false }),
+      ])
+      if (!expRes.error) setExpenses(expRes.data || [])
+      if (!purRes.error) setPurchases(purRes.data || [])
+    } catch (err) {
+      console.error('Expenses fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const totalExpenses = expenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0)

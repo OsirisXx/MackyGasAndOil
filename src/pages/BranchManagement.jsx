@@ -17,16 +17,21 @@ export default function BranchManagement() {
 
   const loadBranches = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('branches')
-      .select('*')
-      .order('name')
-    if (error) {
-      toast.error('Failed to load branches: ' + error.message)
-    } else {
-      setBranches(data || [])
+    try {
+      const { data, error } = await supabase
+        .from('branches')
+        .select('*')
+        .order('name')
+      if (error) {
+        toast.error('Failed to load branches: ' + error.message)
+      } else {
+        setBranches(data || [])
+      }
+    } catch (err) {
+      console.error('Branch fetch error:', err)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const resetForm = () => {

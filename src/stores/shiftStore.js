@@ -8,17 +8,16 @@ export const useShiftStore = create((set, get) => ({
   error: null,
 
   fetchShifts: async (date) => {
-    set({ loading: true })
+    if (get()._fetching) return
+    set({ _fetching: true, loading: true })
     try {
       let query = supabase.from('shifts').select('*, profiles(full_name)').order('shift_date', { ascending: false })
       if (date) query = query.eq('shift_date', date)
       const { data, error } = await query
       if (error) throw error
-      set({ shifts: data })
+      set({ shifts: data, loading: false, _fetching: false, error: null })
     } catch (error) {
-      set({ error: error.message })
-    } finally {
-      set({ loading: false })
+      set({ error: error.message, loading: false, _fetching: false })
     }
   },
 
@@ -37,13 +36,11 @@ export const useShiftStore = create((set, get) => ({
         .select('*, profiles(full_name)')
         .single()
       if (error) throw error
-      set({ currentShift: data })
+      set({ currentShift: data, loading: false })
       return { success: true, data }
     } catch (error) {
-      set({ error: error.message })
+      set({ error: error.message, loading: false })
       return { success: false, error: error.message }
-    } finally {
-      set({ loading: false })
     }
   },
 

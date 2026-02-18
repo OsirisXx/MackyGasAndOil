@@ -7,7 +7,8 @@ export const useProductStore = create((set, get) => ({
   error: null,
 
   fetchProducts: async () => {
-    set({ loading: true })
+    if (get()._fetching) return
+    set({ _fetching: true, loading: true })
     try {
       const { data, error } = await supabase
         .from('products')
@@ -15,14 +16,11 @@ export const useProductStore = create((set, get) => ({
         .order('category')
         .order('name')
       if (error) throw error
-      // Filter active products client-side (in case is_active column doesn't exist)
       const activeProducts = data?.filter(p => p.is_active !== false) || []
-      set({ products: activeProducts })
+      set({ products: activeProducts, loading: false, _fetching: false, error: null })
     } catch (error) {
       console.error('Failed to fetch products:', error)
-      set({ error: error.message })
-    } finally {
-      set({ loading: false })
+      set({ error: error.message, loading: false, _fetching: false })
     }
   },
 

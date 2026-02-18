@@ -32,34 +32,39 @@ export default function ShiftReadings() {
 
   const fetchReadings = async () => {
     setLoading(true)
-    let query = supabase
-      .from('shift_fuel_readings')
-      .select('*, fuel_types(name, short_code, current_price), cashiers(full_name)')
-      .eq('shift_date', shiftDate)
-      .eq('shift_number', selectedShift)
-      .order('created_at')
-    
-    if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
-    
-    const { data, error } = await query
-    if (error) {
-      console.warn('shift_fuel_readings table may not exist:', error.message)
+    try {
+      let query = supabase
+        .from('shift_fuel_readings')
+        .select('*, fuel_types(name, short_code, current_price), cashiers(full_name)')
+        .eq('shift_date', shiftDate)
+        .eq('shift_number', selectedShift)
+        .order('created_at')
+      
+      if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
+      
+      const { data, error } = await query
+      if (error) {
+        console.warn('shift_fuel_readings table may not exist:', error.message)
+        setReadings([])
+      } else {
+        setReadings(data || [])
+        const form = {}
+        data?.forEach(r => {
+          form[r.fuel_type_id] = {
+            beginning_reading: r.beginning_reading || '',
+            ending_reading: r.ending_reading || '',
+            adjustment_liters: r.adjustment_liters || 0,
+            adjustment_reason: r.adjustment_reason || '',
+          }
+        })
+        setEditForm(form)
+      }
+    } catch (err) {
+      console.error('ShiftReadings fetch error:', err)
       setReadings([])
-    } else {
-      setReadings(data || [])
-      // Initialize edit form with existing data
-      const form = {}
-      data?.forEach(r => {
-        form[r.fuel_type_id] = {
-          beginning_reading: r.beginning_reading || '',
-          ending_reading: r.ending_reading || '',
-          adjustment_liters: r.adjustment_liters || 0,
-          adjustment_reason: r.adjustment_reason || '',
-        }
-      })
-      setEditForm(form)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const getReadingForFuel = (fuelId) => readings.find(r => r.fuel_type_id === fuelId)
