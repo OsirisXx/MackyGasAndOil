@@ -6,10 +6,10 @@ import { format } from 'date-fns'
 import { FileText, Printer, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const SHIFTS = [
-  { number: 1, label: '1st' },
-  { number: 2, label: '2nd' },
-  { number: 3, label: '3rd' },
+const FALLBACK_SHIFTS = [
+  { shift_number: 1, label: 'Shift 1' },
+  { shift_number: 2, label: 'Shift 2' },
+  { shift_number: 3, label: 'Shift 3' },
 ]
 
 export default function AccountabilityReport() {
@@ -19,6 +19,7 @@ export default function AccountabilityReport() {
   const [selectedShift, setSelectedShift] = useState(1)
   const [loading, setLoading] = useState(false)
   const printRef = useRef(null)
+  const [shifts, setShifts] = useState(FALLBACK_SHIFTS)
 
   // Data states
   const [fuelReadings, setFuelReadings] = useState([])
@@ -28,9 +29,32 @@ export default function AccountabilityReport() {
   const [checks, setChecks] = useState([])
   const [expenses, setExpenses] = useState([])
   const [purchases, setPurchases] = useState([])
-  const [productSales, setProductSales] = useState({ oil_lubes: 0, accessories: 0, services: 0, miscellaneous: 0 })
+  const [productSalesData, setProductSalesData] = useState([])
 
   useEffect(() => { fetchFuelTypes() }, [])
+
+  // Fetch shifts for selected branch
+  useEffect(() => {
+    const fetchShifts = async () => {
+      if (!selectedBranchId) { setShifts(FALLBACK_SHIFTS); return }
+      const { data } = await supabase
+        .from('branch_shifts')
+        .select('*')
+        .eq('branch_id', selectedBranchId)
+        .eq('is_active', true)
+        .order('shift_number')
+      if (data && data.length > 0) {
+        setShifts(data)
+        if (!data.find(s => s.shift_number === selectedShift)) {
+          setSelectedShift(data[0].shift_number)
+        }
+      } else {
+        setShifts(FALLBACK_SHIFTS)
+      }
+    }
+    if (initialized) fetchShifts()
+  }, [selectedBranchId, initialized])
+
   useEffect(() => { if (initialized) fetchAllData() }, [reportDate, selectedShift, selectedBranchId, initialized])
 
   const fetchAllData = async () => {
@@ -40,8 +64,9 @@ export default function AccountabilityReport() {
       const end = reportDate + 'T23:59:59'
 
       let readingsQ = supabase.from('shift_fuel_readings').select('*, fuel_types(name, short_code)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
-      let salesQ = supabase.from('cash_sales').select('*').gte('created_at', start).lte('created_at', end)
+      let salesQ = supabase.from('cash_sales').select('*, fuel_types(short_code)').gte('created_at', start).lte('created_at', end)
       let ciQ = supabase.from('purchase_orders').select('*, fuel_types(short_code), cashiers(full_name)').gte('created_at', start).lte('created_at', end)
+      let prodSalesQ = supabase.from('product_sales').select('*, products(category)').gte('created_at', start).lte('created_at', end)
       let depQ = supabase.from('deposits').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       let chkQ = supabase.from('checks').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       let expQ = supabase.from('expenses').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
@@ -55,10 +80,11 @@ export default function AccountabilityReport() {
         chkQ = chkQ.eq('branch_id', selectedBranchId)
         expQ = expQ.eq('branch_id', selectedBranchId)
         purQ = purQ.eq('branch_id', selectedBranchId)
+        prodSalesQ = prodSalesQ.eq('branch_id', selectedBranchId)
       }
 
-      const [readingsRes, salesRes, ciRes, depRes, chkRes, expRes, purRes] = await Promise.all([
-        readingsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ
+      const [readingsRes, salesRes, ciRes, depRes, chkRes, expRes, purRes, prodSalesRes] = await Promise.all([
+        readingsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ, prodSalesQ
       ])
 
       setFuelReadings(readingsRes.data || [])
@@ -68,6 +94,7 @@ export default function AccountabilityReport() {
       setChecks(chkRes.data || [])
       setExpenses(expRes.data || [])
       setPurchases(purRes.data || [])
+      setProductSalesData(prodSalesRes.data || [])
     } catch (err) {
       console.error('AccountabilityReport fetch error:', err)
     } finally {
@@ -78,11 +105,16 @@ export default function AccountabilityReport() {
   // Calculate totals
   const getFuelReading = (fuelId) => fuelReadings.find(r => r.fuel_type_id === fuelId)
   
-  const totalFuelSales = fuelReadings.reduce((s, r) => s + parseFloat(r.total_value || 0), 0)
-  const totalOilLubes = productSales.oil_lubes
-  const totalAccessories = productSales.accessories
-  const totalServices = productSales.services
-  const totalMiscellaneous = productSales.miscellaneous
+  const totalFuelReadings = fuelReadings.reduce((s, r) => s + parseFloat(r.total_value || 0), 0)
+  const totalPosCashSales = cashSales.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
+  // Use fuel readings if available, otherwise fall back to POS cash sales
+  const totalFuelSales = totalFuelReadings > 0 ? totalFuelReadings : totalPosCashSales
+
+  // Product sales by category from actual data
+  const totalOilLubes = productSalesData.filter(p => p.products?.category === 'oil_lubes').reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
+  const totalAccessories = productSalesData.filter(p => p.products?.category === 'accessories').reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
+  const totalServices = productSalesData.filter(p => p.products?.category === 'services').reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
+  const totalMiscellaneous = productSalesData.filter(p => !p.products?.category || p.products?.category === 'miscellaneous').reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
   const totalChargeInvoices = chargeInvoices.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalDeposits = deposits.reduce((s, d) => s + parseFloat(d.amount || 0), 0)
   const totalCashDeposit = deposits.filter(d => d.payment_method === 'cash').reduce((s, d) => s + parseFloat(d.amount || 0), 0)
@@ -165,11 +197,11 @@ export default function AccountabilityReport() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Shift</label>
             <div className="flex gap-1">
-              {SHIFTS.map(s => (
-                <button key={s.number}
-                  onClick={() => setSelectedShift(s.number)}
+              {shifts.map(s => (
+                <button key={s.shift_number}
+                  onClick={() => setSelectedShift(s.shift_number)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    selectedShift === s.number 
+                    selectedShift === s.shift_number 
                       ? 'bg-blue-600 text-white' 
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}>
@@ -196,7 +228,7 @@ export default function AccountabilityReport() {
             <span className="font-medium">DATE:</span> {format(new Date(reportDate), 'MM-dd-yy')}
           </div>
           <div className="border border-gray-300 px-3 py-1 text-sm">
-            <span className="font-medium">SHIFT:</span> {SHIFTS.find(s => s.number === selectedShift)?.label}
+            <span className="font-medium">SHIFT:</span> {shifts.find(s => s.shift_number === selectedShift)?.label || `Shift ${selectedShift}`}
           </div>
         </div>
 
@@ -277,6 +309,16 @@ export default function AccountabilityReport() {
             </tr>
           </tbody>
         </table>
+
+        {/* POS Cash Sales fallback notice */}
+        {totalFuelReadings === 0 && totalPosCashSales > 0 && (
+          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+            <span className="font-medium">Note:</span> No pump readings entered. Showing POS cash sales (₱{totalPosCashSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}) as fuel total.
+            {cashSales.length > 0 && (
+              <span className="ml-1">({cashSales.length} transaction{cashSales.length > 1 ? 's' : ''}: {cashSales.map(s => `${s.fuel_types?.short_code || 'FUEL'} ₱${parseFloat(s.amount).toFixed(2)}`).join(', ')})</span>
+            )}
+          </div>
+        )}
 
         {/* Total Fuel Summary */}
         <div className="flex justify-end mb-4">
