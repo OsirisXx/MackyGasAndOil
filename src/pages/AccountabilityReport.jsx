@@ -141,9 +141,12 @@ export default function AccountabilityReport() {
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { font-family: Arial, sans-serif; font-size: 11px; padding: 20px; }
-            .header { text-align: center; margin-bottom: 20px; }
-            .header h1 { font-size: 18px; font-weight: bold; }
+            .header { margin-bottom: 20px; }
+            .header > div:first-child { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 8px; }
+            .header img { width: 64px; height: 64px; object-fit: contain; }
+            .header h1 { font-size: 20px; font-weight: bold; letter-spacing: 1px; }
             .header p { font-size: 10px; color: #666; }
+            .header h2 { font-size: 14px; font-weight: bold; text-align: center; margin-top: 12px; }
             .meta { display: flex; justify-content: flex-end; gap: 20px; margin-bottom: 15px; }
             .meta-item { border: 1px solid #000; padding: 4px 10px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
@@ -220,10 +223,15 @@ export default function AccountabilityReport() {
       {/* Printable Report */}
       <div ref={printRef} className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 print:shadow-none print:border-0">
         {/* Header */}
-        <div className="header text-center mb-6">
-          <h1 className="text-xl font-bold">MACKY OIL&GAS</h1>
-          <p className="text-xs text-gray-500">Lower Sosohon, Manolo Fortich, Bukidnon</p>
-          <h2 className="text-lg font-bold mt-2">DAILY ACCOUNTABILITY REPORT</h2>
+        <div className="header mb-6">
+          <div className="flex items-center justify-center gap-4 mb-2">
+            <img src="/logo.png" alt="Macky Oil & Gas" className="w-16 h-16 object-contain" />
+            <div className="text-center">
+              <h1 className="text-2xl font-bold tracking-wide">MACKY OIL&GAS</h1>
+              <p className="text-xs text-gray-600">Lower Sosohon, Manolo Fortich, Bukidnon</p>
+            </div>
+          </div>
+          <h2 className="text-lg font-bold text-center mt-3">DAILY ACCOUNTABILITY REPORT</h2>
         </div>
 
         {/* Date/Shift Meta */}
