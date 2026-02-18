@@ -1,16 +1,11 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useFuelStore } from '../stores/fuelStore'
 import { useBranchStore } from '../stores/branchStore'
+import { getShiftsForBranch, formatShiftTime } from '../utils/shiftConfig'
 import { format } from 'date-fns'
 import { FileText, Printer, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
-
-const SHIFTS = [
-  { number: 1, label: '1st' },
-  { number: 2, label: '2nd' },
-  { number: 3, label: '3rd' },
-]
 
 export default function AccountabilityReport() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
@@ -19,6 +14,10 @@ export default function AccountabilityReport() {
   const [selectedShift, setSelectedShift] = useState(1)
   const [loading, setLoading] = useState(true)
   const printRef = useRef(null)
+
+  // Get branch-specific shifts
+  const selectedBranch = branches.find(b => b.id === selectedBranchId)
+  const SHIFTS = useMemo(() => getShiftsForBranch(selectedBranch?.name), [selectedBranch?.name])
 
   // Data states
   const [fuelReadings, setFuelReadings] = useState([])

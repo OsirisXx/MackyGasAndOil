@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useFuelStore } from '../stores/fuelStore'
 import { useBranchStore } from '../stores/branchStore'
+import { getShiftsForBranch, formatShiftTime } from '../utils/shiftConfig'
 import { format } from 'date-fns'
 import { 
   Gauge, Save, Clock, CheckCircle, AlertCircle, ChevronDown, ChevronUp,
@@ -9,12 +10,6 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
-
-const SHIFTS = [
-  { number: 1, label: 'Shift 1', time: '6:00 AM - 2:00 PM' },
-  { number: 2, label: 'Shift 2', time: '2:00 PM - 10:00 PM' },
-  { number: 3, label: 'Shift 3', time: '10:00 PM - 6:00 AM' },
-]
 
 export default function ShiftReadings() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
@@ -26,6 +21,10 @@ export default function ShiftReadings() {
   const [saving, setSaving] = useState(false)
   const [editForm, setEditForm] = useState({})
   const [unlockedReadings, setUnlockedReadings] = useState(new Set())
+
+  // Get branch-specific shifts
+  const selectedBranch = branches.find(b => b.id === selectedBranchId)
+  const SHIFTS = useMemo(() => getShiftsForBranch(selectedBranch?.name), [selectedBranch?.name])
 
   useEffect(() => { fetchFuelTypes() }, [])
   useEffect(() => { if (initialized) fetchReadings() }, [shiftDate, selectedShift, selectedBranchId, initialized])
@@ -272,7 +271,7 @@ export default function ShiftReadings() {
             </div>
           </div>
           <div className="text-xs text-gray-400">
-            {SHIFTS.find(s => s.number === selectedShift)?.time}
+            {formatShiftTime(SHIFTS.find(s => s.number === selectedShift) || SHIFTS[0])}
           </div>
         </div>
       </div>
