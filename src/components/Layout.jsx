@@ -133,20 +133,22 @@ export default function Layout({ children }) {
 
         {/* User + Collapse */}
         <div className="border-t border-blue-800 p-3">
-          {!collapsed && (
-            <div className="flex items-center gap-3 mb-3 px-2">
-              <div className="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center text-sm font-medium">
-                {adminProfile?.full_name?.charAt(0)?.toUpperCase() || 'A'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{adminProfile?.full_name || 'Admin'}</p>
-                <p className="text-[10px] text-blue-300 capitalize">{adminProfile?.role || 'admin'}</p>
-              </div>
-              <button onClick={handleSignOut} className="text-blue-300 hover:text-white p-1" title="Sign Out">
-                <LogOut size={18} />
-              </button>
+          <div className={`flex items-center mb-3 ${collapsed ? 'justify-center' : 'px-2'}`}>
+            <div className="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center text-sm font-medium shrink-0">
+              {adminProfile?.full_name?.charAt(0)?.toUpperCase() || 'A'}
             </div>
-          )}
+            {!collapsed && (
+              <>
+                <div className="flex-1 min-w-0 ml-3">
+                  <p className="text-sm font-medium truncate">{adminProfile?.full_name || 'Admin'}</p>
+                  <p className="text-[10px] text-blue-300 capitalize">{adminProfile?.role || 'admin'}</p>
+                </div>
+                <button onClick={handleSignOut} className="text-blue-300 hover:text-white p-1" title="Sign Out">
+                  <LogOut size={18} />
+                </button>
+              </>
+            )}
+          </div>
           {collapsed && (
             <button onClick={handleSignOut} className="w-full flex justify-center text-blue-300 hover:text-white p-2 mb-2" title="Sign Out">
               <LogOut size={18} />
@@ -158,12 +160,16 @@ export default function Layout({ children }) {
           >
             {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
-          {!collapsed && (
-            <div className="mt-3 pt-3 border-t border-blue-800/50 text-center">
-              <p className="text-[9px] text-blue-400/70">Powered by</p>
-              <p className="text-[10px] text-blue-300 font-medium">Raijin Tech Solutions</p>
-            </div>
-          )}
+          <div className="mt-3 pt-3 border-t border-blue-800/50 text-center">
+            {collapsed ? (
+              <p className="text-[9px] text-blue-400/70">RTS</p>
+            ) : (
+              <>
+                <p className="text-[9px] text-blue-400/70">Powered by</p>
+                <p className="text-[10px] text-blue-300 font-medium">Raijin Tech Solutions</p>
+              </>
+            )}
+          </div>
         </div>
       </aside>
 
