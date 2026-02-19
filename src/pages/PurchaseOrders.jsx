@@ -9,7 +9,7 @@ import { logAudit } from '../stores/auditStore'
 
 export default function PurchaseOrders() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
-  const { selectedBranchId, initialized } = useBranchStore()
+  const { selectedBranchId } = useBranchStore()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -18,7 +18,7 @@ export default function PurchaseOrders() {
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
 
   useEffect(() => { fetchFuelTypes() }, [])
-  useEffect(() => { if (initialized) fetchOrders() }, [startDate, endDate, statusFilter, selectedBranchId, initialized])
+  useEffect(() => { fetchOrders() }, [startDate, endDate, statusFilter, selectedBranchId])
 
   const fetchOrders = async () => {
     setLoading(true)

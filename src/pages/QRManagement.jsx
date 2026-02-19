@@ -13,10 +13,10 @@ export default function QRManagement() {
   const [form, setForm] = useState({ full_name: '', branch_id: '' })
   const [selectedCashier, setSelectedCashier] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
-  const { branches, selectedBranchId, fetchBranches, initialized } = useBranchStore()
+  const { branches, selectedBranchId, fetchBranches } = useBranchStore()
 
   useEffect(() => { fetchBranches() }, [])
-  useEffect(() => { if (initialized) fetchCashiers() }, [selectedBranchId, initialized])
+  useEffect(() => { fetchCashiers() }, [selectedBranchId])
 
   const fetchCashiers = async () => {
     setLoading(true)

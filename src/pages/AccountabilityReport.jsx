@@ -9,7 +9,7 @@ import toast from 'react-hot-toast'
 
 export default function AccountabilityReport() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
-  const { branches, selectedBranchId, initialized } = useBranchStore()
+  const { branches, selectedBranchId } = useBranchStore()
   const [reportDate, setReportDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [selectedShift, setSelectedShift] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -30,7 +30,7 @@ export default function AccountabilityReport() {
   const [productSales, setProductSales] = useState({ oil_lubes: 0, accessories: 0, services: 0, miscellaneous: 0 })
 
   useEffect(() => { fetchFuelTypes() }, [])
-  useEffect(() => { if (initialized) fetchAllData() }, [reportDate, selectedShift, selectedBranchId, initialized])
+  useEffect(() => { fetchAllData() }, [reportDate, selectedShift, selectedBranchId])
 
   const fetchAllData = async () => {
     setLoading(true)

@@ -5,7 +5,7 @@ import { TrendingUp, Calendar, Download, Fuel, DollarSign, Receipt, ShoppingBag,
 import { format, subDays, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from 'date-fns'
 
 export default function Reports() {
-  const { selectedBranchId, initialized } = useBranchStore()
+  const { selectedBranchId } = useBranchStore()
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
   const [dailyData, setDailyData] = useState([])
@@ -15,7 +15,7 @@ export default function Reports() {
     cashSalesCount: 0, poCount: 0, uniqueCashiers: 0,
   })
 
-  useEffect(() => { if (initialized) fetchReports() }, [startDate, endDate, selectedBranchId, initialized])
+  useEffect(() => { fetchReports() }, [startDate, endDate, selectedBranchId])
 
   const fetchReports = async () => {
     setLoading(true)

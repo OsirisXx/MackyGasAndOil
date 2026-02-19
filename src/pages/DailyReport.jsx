@@ -38,7 +38,7 @@ function Section({ title, icon: Icon, children, count, total, defaultOpen = true
 
 export default function DailyReport() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
-  const { selectedBranchId, initialized } = useBranchStore()
+  const { selectedBranchId } = useBranchStore()
   const [reportDate, setReportDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [loading, setLoading] = useState(true)
   const [cashSales, setCashSales] = useState([])
@@ -78,8 +78,8 @@ export default function DailyReport() {
   useEffect(() => { fetchFuelTypes() }, [])
 
   useEffect(() => {
-    if (initialized) fetchData()
-  }, [reportDate, selectedBranchId, initialized])
+    fetchData()
+  }, [reportDate, selectedBranchId])
 
   const totalCashSales = cashSales.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
   const totalPurchaseOrders = purchaseOrders.reduce((s, r) => s + parseFloat(r.amount || 0), 0)

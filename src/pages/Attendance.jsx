@@ -5,7 +5,7 @@ import { Clock, Calendar, Search, User, LayoutList, GitBranch, RefreshCw } from 
 import { format, subDays, parseISO, differenceInMinutes } from 'date-fns'
 
 export default function Attendance() {
-  const { selectedBranchId, initialized } = useBranchStore()
+  const { selectedBranchId } = useBranchStore()
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 7), 'yyyy-MM-dd'))
@@ -15,12 +15,12 @@ export default function Attendance() {
   const [viewMode, setViewMode] = useState('table') // 'table' or 'timeline'
 
   useEffect(() => {
-    if (initialized) fetchCashiers()
-  }, [initialized, selectedBranchId])
+    fetchCashiers()
+  }, [selectedBranchId])
 
   useEffect(() => {
-    if (initialized) fetchRecords()
-  }, [startDate, endDate, filterCashier, selectedBranchId, initialized])
+    fetchRecords()
+  }, [startDate, endDate, filterCashier, selectedBranchId])
 
   const fetchCashiers = async () => {
     let q = supabase.from('cashiers').select('id, full_name').order('full_name')

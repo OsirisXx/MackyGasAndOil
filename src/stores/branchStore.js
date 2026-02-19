@@ -9,13 +9,11 @@ export const useBranchStore = create(
       selectedBranchId: null, // null = "All Branches"
       loading: false,
       lastFetch: 0,
-      initialized: true,
 
       fetchBranches: async (force = false) => {
         // Prevent redundant fetches within 5 seconds
         const now = Date.now()
         if (!force && get().branches.length > 0 && now - get().lastFetch < 5000) {
-          if (!get().initialized) set({ initialized: true })
           return
         }
         // Removed loading guard — it was silently dropping fetch calls during navigation
@@ -29,13 +27,13 @@ export const useBranchStore = create(
             .order('name')
           if (error) {
             console.warn('branches table not available yet:', error.message)
-            set({ branches: [], loading: false, lastFetch: now, initialized: true })
+            set({ branches: [], loading: false, lastFetch: now })
             return
           }
-          set({ branches: data || [], loading: false, lastFetch: now, initialized: true })
+          set({ branches: data || [], loading: false, lastFetch: now })
         } catch (e) {
           console.warn('Failed to fetch branches:', e)
-          set({ branches: [], loading: false, lastFetch: now, initialized: true })
+          set({ branches: [], loading: false, lastFetch: now })
         }
       },
 
@@ -56,7 +54,7 @@ export const useBranchStore = create(
       },
     }),
     {
-      name: 'macky-pos-branch',
+      name: 'macky-pos-branch-v2',
       partialize: (state) => ({
         branches: state.branches,
       }),

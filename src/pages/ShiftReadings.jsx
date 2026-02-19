@@ -13,7 +13,7 @@ import { logAudit } from '../stores/auditStore'
 
 export default function ShiftReadings() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
-  const { branches, selectedBranchId, initialized } = useBranchStore()
+  const { branches, selectedBranchId } = useBranchStore()
   const [shiftDate, setShiftDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [selectedShift, setSelectedShift] = useState(1)
   const [readings, setReadings] = useState([])
@@ -27,7 +27,7 @@ export default function ShiftReadings() {
   const SHIFTS = useMemo(() => getShiftsForBranch(selectedBranch?.name), [selectedBranch?.name])
 
   useEffect(() => { fetchFuelTypes() }, [])
-  useEffect(() => { if (initialized) fetchReadings() }, [shiftDate, selectedShift, selectedBranchId, initialized])
+  useEffect(() => { fetchReadings() }, [shiftDate, selectedShift, selectedBranchId])
 
   const fetchReadings = async () => {
     setLoading(true)

@@ -43,7 +43,7 @@ function StatCard({ icon: Icon, label, value, sub, color = 'blue', trend }) {
 export default function Dashboard() {
   const { adminProfile: profile } = useAuthStore()
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
-  const { selectedBranchId, getSelectedBranch, initialized } = useBranchStore()
+  const { selectedBranchId, getSelectedBranch } = useBranchStore()
   const [today] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
@@ -124,10 +124,8 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (initialized) {
-      fetchDashboardData()
-    }
-  }, [selectedBranchId, initialized])
+    fetchDashboardData()
+  }, [selectedBranchId])
 
   return (
     <div className="space-y-6">
