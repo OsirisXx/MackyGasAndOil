@@ -284,6 +284,7 @@ export default function POS() {
       // Insert each cart item as a product sale
       const salesData = cart.map(item => ({
         cashier_id: cashier.id,
+        cashier_name: cashier.full_name,
         branch_id: cashier.branch_id || null,
         product_id: item.product.id,
         product_name: item.product.name,

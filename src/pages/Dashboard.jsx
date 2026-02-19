@@ -218,7 +218,7 @@ export default function Dashboard() {
                       </span>
                     )}
                     <span className="text-xs text-gray-400">
-                      {s.cashiers?.full_name || 'Unknown'} • {format(new Date(s.created_at), 'h:mm a')}
+                      {s.cashiers?.full_name || s.cashier_name || 'Unknown'} • {format(new Date(s.created_at), 'h:mm a')}
                     </span>
                   </div>
                   <span className="font-bold text-gray-800">
