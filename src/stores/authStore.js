@@ -1,10 +1,27 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import { supabase } from '../lib/supabase'
 import { useAuditStore } from './auditStore'
 
 // Track initialization outside of store to avoid any persist/hydration issues
 let _initStarted = false
+
+// Custom storage that doesn't sync across tabs to prevent POS actions from affecting admin
+const noSyncStorage = {
+  getItem: (name) => {
+    const str = localStorage.getItem(name)
+    console.log('[AuthStore Storage] getItem:', name, str ? 'found' : 'not found')
+    return str ? JSON.parse(str) : null
+  },
+  setItem: (name, value) => {
+    console.log('[AuthStore Storage] setItem:', name, value)
+    localStorage.setItem(name, JSON.stringify(value))
+  },
+  removeItem: (name) => {
+    console.log('[AuthStore Storage] removeItem:', name)
+    localStorage.removeItem(name)
+  },
+}
 
 export const useAuthStore = create(
   persist(
@@ -26,6 +43,9 @@ export const useAuthStore = create(
         // Using module-level flag so it's never affected by hydration or state merging.
         if (_initStarted) return
         _initStarted = true
+
+        // Ensure loading starts as true for initialization
+        set({ loading: true })
 
         // Safety timeout — if getSession() hangs, force loading off after 5s
         const safetyTimer = setTimeout(() => {
@@ -73,6 +93,7 @@ export const useAuthStore = create(
 
       // Admin login (email + password)
       adminSignIn: async (email, password) => {
+        console.log('[AuthStore] adminSignIn - setting loading true')
         set({ loading: true, error: null })
         try {
           const { data, error } = await supabase.auth.signInWithPassword({ email, password })
@@ -82,6 +103,7 @@ export const useAuthStore = create(
             .select('*')
             .eq('id', data.user.id)
             .single()
+          console.log('[AuthStore] adminSignIn - setting loading false (success)')
           set({ adminUser: data.user, adminProfile: profile, mode: 'admin', loading: false })
           useAuditStore.getState().logAction({
             action: 'login',
@@ -97,6 +119,7 @@ export const useAuthStore = create(
 
       // Cashier login via QR token
       cashierLoginByToken: async (token) => {
+        console.log('[AuthStore] cashierLoginByToken - setting loading true')
         set({ loading: true, error: null })
         try {
           const { data, error } = await supabase
@@ -118,6 +141,7 @@ export const useAuthStore = create(
             .select()
             .single()
 
+          console.log('[AuthStore] cashierLoginByToken - setting loading false (success)')
           set({
             cashier: data,
             attendanceId: att?.id || null,
@@ -135,6 +159,7 @@ export const useAuthStore = create(
           })
           return { success: true, cashier: data }
         } catch (error) {
+          console.log('[AuthStore] cashierLoginByToken - setting loading false (error)')
           set({ error: error.message, loading: false })
           return { success: false, error: error.message }
         }
@@ -142,6 +167,7 @@ export const useAuthStore = create(
 
       // Cashier check-out (end shift)
       cashierCheckOut: async () => {
+        console.log('[AuthStore] cashierCheckOut called')
         const { attendanceId, cashier } = get()
         if (attendanceId) {
           await supabase
@@ -160,7 +186,9 @@ export const useAuthStore = create(
             branchName: cashier.branches?.name,
           })
         }
-        set({ cashier: null, attendanceId: null, mode: get().adminUser ? 'admin' : 'none' })
+        const newMode = get().adminUser ? 'admin' : 'none'
+        console.log('[AuthStore] cashierCheckOut - setting mode to', newMode)
+        set({ cashier: null, attendanceId: null, mode: newMode })
       },
 
       // Switch from cashier mode back to admin
@@ -194,7 +222,8 @@ export const useAuthStore = create(
       isCashier: () => get().mode === 'cashier' && get().cashier,
     }),
     {
-      name: 'macky-pos-auth',
+      name: 'macky-pos-auth-v3',
+      storage: createJSONStorage(() => noSyncStorage),
       partialize: (state) => ({
         cashier: state.cashier,
         attendanceId: state.attendanceId,

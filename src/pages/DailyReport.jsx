@@ -60,7 +60,7 @@ export default function DailyReport() {
       let poQ = supabase.from('purchase_orders').select('*, fuel_types(short_code, name), cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
       if (selectedBranchId) poQ = poQ.eq('branch_id', selectedBranchId)
 
-      let prodQ = supabase.from('product_sales').select('*, cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
+      let prodQ = supabase.from('product_sales').select('*').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
       if (selectedBranchId) prodQ = prodQ.eq('branch_id', selectedBranchId)
 
       const [{ data: sales }, { data: pos }, { data: prods }] = await Promise.all([salesQ, poQ, prodQ])

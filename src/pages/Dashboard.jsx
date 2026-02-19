@@ -59,6 +59,7 @@ export default function Dashboard() {
   const [recentSales, setRecentSales] = useState([])
 
   const fetchDashboardData = async () => {
+    console.log('[Dashboard] fetchDashboardData started')
     setLoading(true)
     try {
       const startOfDay = today + 'T00:00:00'
@@ -84,7 +85,7 @@ export default function Dashboard() {
       let recentCashQ = supabase.from('cash_sales').select('*, fuel_types(short_code), cashiers(full_name)').order('created_at', { ascending: false }).limit(5)
       if (selectedBranchId) recentCashQ = recentCashQ.eq('branch_id', selectedBranchId)
 
-      let recentProdQ = supabase.from('product_sales').select('*, cashiers:cashier_id(full_name)').order('created_at', { ascending: false }).limit(5)
+      let recentProdQ = supabase.from('product_sales').select('*').order('created_at', { ascending: false }).limit(5)
       if (selectedBranchId) recentProdQ = recentProdQ.eq('branch_id', selectedBranchId)
 
       const [{ data: cashSales }, { data: purchaseOrders }, { count: activeCashiers }, { data: productSales }, { data: recentCash }, { data: recentProd }] = await Promise.all([salesQ, poQ, cashierQ, productQ, recentCashQ, recentProdQ])
@@ -113,8 +114,9 @@ export default function Dashboard() {
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5)
       setRecentSales(combined)
     } catch (err) {
-      console.error('Dashboard fetch error:', err)
+      console.error('[Dashboard] fetch error:', err)
     } finally {
+      console.log('[Dashboard] fetchDashboardData completed')
       setLoading(false)
     }
   }

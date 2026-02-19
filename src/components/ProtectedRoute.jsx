@@ -4,7 +4,9 @@ import { useAuthStore } from '../stores/authStore'
 export function AdminRoute({ children }) {
   const { mode, adminUser, loading } = useAuthStore()
 
-  if (loading) return <LoadingScreen />
+  // Only show loading during initial auth check, not during cashier operations
+  // Check if we have adminUser - if yes, ignore loading state from cashier actions
+  if (loading && !adminUser) return <LoadingScreen />
   if (!adminUser || mode !== 'admin') return <Navigate to="/login" replace />
   return children
 }
