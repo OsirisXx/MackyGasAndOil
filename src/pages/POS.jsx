@@ -228,9 +228,20 @@ export default function POS() {
   }, [products, productSearch])
 
   const addToCart = (product) => {
+    // Check if product has stock
+    if (product.stock_quantity <= 0) {
+      toast.error(`${product.name} is out of stock`)
+      return
+    }
+    
     setCart(prev => {
       const existing = prev.find(item => item.product.id === product.id)
       if (existing) {
+        // Check if adding more would exceed stock
+        if (existing.quantity >= product.stock_quantity) {
+          toast.error(`Only ${product.stock_quantity} ${product.name} in stock`)
+          return prev
+        }
         return prev.map(item => 
           item.product.id === product.id 
             ? { ...item, quantity: item.quantity + 1 }
@@ -246,6 +257,11 @@ export default function POS() {
       return prev.map(item => {
         if (item.product.id === productId) {
           const newQty = item.quantity + delta
+          // Check stock limit when increasing
+          if (delta > 0 && newQty > item.product.stock_quantity) {
+            toast.error(`Only ${item.product.stock_quantity} ${item.product.name} in stock`)
+            return item
+          }
           return newQty > 0 ? { ...item, quantity: newQty } : null
         }
         return item
@@ -777,13 +793,26 @@ export default function POS() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {filteredProducts.map(p => (
                         <button key={p.id} onClick={() => addToCart(p)}
-                          className="p-3 border border-gray-200 rounded-lg text-left hover:border-purple-300 hover:bg-purple-50 transition-colors">
+                          disabled={p.stock_quantity <= 0}
+                          className={`p-3 border rounded-lg text-left transition-colors ${
+                            p.stock_quantity <= 0 
+                              ? 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed' 
+                              : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                          }`}>
                           <p className="font-medium text-gray-800 text-sm truncate">{p.name}</p>
                           <p className="text-[10px] text-gray-400">{CATEGORIES[p.category] || p.category}</p>
-                          <p className="text-purple-600 font-bold text-sm mt-1">₱{parseFloat(p.price).toFixed(2)}</p>
-                          {p.stock_quantity <= p.reorder_level && (
-                            <p className="text-[9px] text-red-500 mt-0.5">Low stock: {p.stock_quantity}</p>
-                          )}
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-purple-600 font-bold text-sm">₱{parseFloat(p.price).toFixed(2)}</p>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                              p.stock_quantity <= 0 
+                                ? 'bg-red-100 text-red-600' 
+                                : p.stock_quantity <= p.reorder_level 
+                                  ? 'bg-amber-100 text-amber-600' 
+                                  : 'bg-green-100 text-green-600'
+                            }`}>
+                              {p.stock_quantity <= 0 ? 'Out of stock' : `${p.stock_quantity} in stock`}
+                            </span>
+                          </div>
                         </button>
                       ))}
                     </div>
@@ -810,6 +839,7 @@ export default function POS() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-gray-800 truncate">{item.product.name}</p>
                             <p className="text-xs text-gray-400">₱{parseFloat(item.product.price).toFixed(2)} each</p>
+                            <p className="text-[10px] text-gray-400">Stock: {item.product.stock_quantity}</p>
                           </div>
                           <button onClick={() => removeFromCart(item.product.id)}
                             className="text-red-400 hover:text-red-600 text-xs">×</button>
@@ -820,9 +850,16 @@ export default function POS() {
                               className="w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center">
                               <Minus size={12} />
                             </button>
-                            <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
+                            <span className={`w-8 text-center text-sm font-medium ${
+                              item.quantity >= item.product.stock_quantity ? 'text-red-600' : ''
+                            }`}>{item.quantity}</span>
                             <button onClick={() => updateCartQuantity(item.product.id, 1)}
-                              className="w-6 h-6 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center">
+                              disabled={item.quantity >= item.product.stock_quantity}
+                              className={`w-6 h-6 rounded flex items-center justify-center ${
+                                item.quantity >= item.product.stock_quantity 
+                                  ? 'bg-gray-50 text-gray-300 cursor-not-allowed' 
+                                  : 'bg-gray-100 hover:bg-gray-200'
+                              }`}>
                               <Plus size={12} />
                             </button>
                           </div>
