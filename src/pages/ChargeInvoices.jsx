@@ -20,14 +20,19 @@ export default function ChargeInvoices() {
 
   const fetchInvoices = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('charge_invoices')
-      .select('*, daily_reports(report_date, shifts(shift_number))')
-      .gte('created_at', startDate + 'T00:00:00')
-      .lte('created_at', endDate + 'T23:59:59')
-      .order('created_at', { ascending: false })
-    if (!error) setInvoices(data || [])
-    setLoading(false)
+    try {
+      const { data, error } = await supabase
+        .from('charge_invoices')
+        .select('*, daily_reports(report_date, shifts(shift_number))')
+        .gte('created_at', startDate + 'T00:00:00')
+        .lte('created_at', endDate + 'T23:59:59')
+        .order('created_at', { ascending: false })
+      if (!error) setInvoices(data || [])
+    } catch (err) {
+      console.error('ChargeInvoices fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const filtered = invoices.filter(i =>

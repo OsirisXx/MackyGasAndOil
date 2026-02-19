@@ -20,14 +20,19 @@ export default function QRManagement() {
 
   const fetchCashiers = async () => {
     setLoading(true)
-    let query = supabase
-      .from('cashiers')
-      .select('*, branches(name)')
-      .order('created_at', { ascending: false })
-    if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
-    const { data } = await query
-    setCashiers(data || [])
-    setLoading(false)
+    try {
+      let query = supabase
+        .from('cashiers')
+        .select('*, branches(name)')
+        .order('created_at', { ascending: false })
+      if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
+      const { data } = await query
+      setCashiers(data || [])
+    } catch (err) {
+      console.error('QRManagement fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleCreate = async (e) => {
@@ -70,14 +75,20 @@ export default function QRManagement() {
     fetchCashiers()
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this cashier? This cannot be undone.')) return
-    const { error } = await supabase.from('cashiers').delete().eq('id', id)
+  const handleDelete = async (cashier) => {
+    if (!confirm(`Delete "${cashier.full_name}"? All linked records will also be removed. This cannot be undone.`)) return
+
+    // Delete all linked records across all tables first
+    const tables = ['audit_logs', 'cash_sales', 'purchase_orders', 'attendance', 'charge_invoices', 'deposits', 'checks', 'expenses', 'purchases_disbursements', 'shift_fuel_readings']
+    for (const table of tables) {
+      await supabase.from(table).delete().eq('cashier_id', cashier.id)
+    }
+
+    const { error } = await supabase.from('cashiers').delete().eq('id', cashier.id)
     if (error) { toast.error(error.message); return }
     toast.success('Cashier deleted')
-    logAudit('delete', 'cashier', 'Deleted cashier', { entityId: id })
     fetchCashiers()
-    if (selectedCashier?.id === id) setSelectedCashier(null)
+    if (selectedCashier?.id === cashier.id) setSelectedCashier(null)
   }
 
   const handleCopyToken = (token) => {
@@ -215,7 +226,7 @@ export default function QRManagement() {
                         className="p-1.5 text-gray-400 hover:text-blue-600 rounded" title={c.is_active ? 'Deactivate' : 'Activate'}>
                         <RefreshCw size={14} />
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id) }}
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(c) }}
                         className="p-1.5 text-gray-400 hover:text-red-600 rounded" title="Delete">
                         <Trash2 size={14} />
                       </button>

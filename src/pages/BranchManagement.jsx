@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Building2, Plus, Edit2, X, Save, Trash2 } from 'lucide-react'
+import { Building2, Plus, Edit2, X, Save, Trash2, Clock, ToggleLeft, ToggleRight } from 'lucide-react'
 import { useBranchStore } from '../stores/branchStore'
+import { getShiftsForBranch, formatShiftTime } from '../utils/shiftConfig'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
 
@@ -17,16 +18,21 @@ export default function BranchManagement() {
 
   const loadBranches = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('branches')
-      .select('*')
-      .order('name')
-    if (error) {
-      toast.error('Failed to load branches: ' + error.message)
-    } else {
-      setBranches(data || [])
+    try {
+      const { data, error } = await supabase
+        .from('branches')
+        .select('*')
+        .order('name')
+      if (error) {
+        toast.error('Failed to load branches: ' + error.message)
+      } else {
+        setBranches(data || [])
+      }
+    } catch (err) {
+      console.error('BranchManagement fetch error:', err)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const resetForm = () => {
@@ -76,6 +82,30 @@ export default function BranchManagement() {
     if (error) return toast.error(error.message)
     toast.success(currentActive ? 'Branch deactivated' : 'Branch activated')
     logAudit('update', 'branch', currentActive ? 'Deactivated branch' : 'Activated branch', { entityId: id })
+    loadBranches()
+    fetchBranches()
+  }
+
+  const handleDelete = async (branch) => {
+    // Check if branch has linked cashiers
+    const { count } = await supabase
+      .from('cashiers')
+      .select('*', { count: 'exact', head: true })
+      .eq('branch_id', branch.id)
+    
+    if (count > 0) {
+      toast.error(`Cannot delete "${branch.name}" - it has ${count} cashier(s) assigned. Reassign or remove them first, or deactivate the branch instead.`)
+      return
+    }
+
+    if (!confirm(`Are you sure you want to delete "${branch.name}"? This action cannot be undone.`)) return
+    const { error } = await supabase
+      .from('branches')
+      .delete()
+      .eq('id', branch.id)
+    if (error) return toast.error(error.message)
+    toast.success('Branch deleted')
+    logAudit('delete', 'branch', `Deleted branch: ${branch.name}`, { entityId: branch.id })
     loadBranches()
     fetchBranches()
   }
@@ -132,26 +162,44 @@ export default function BranchManagement() {
         ) : (
           <div className="divide-y divide-gray-50">
             {branches.map(b => (
-              <div key={b.id} className="px-4 py-4 flex items-center gap-4 hover:bg-gray-50">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${b.is_active ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
-                  <Building2 size={20} />
+              <div key={b.id} className="px-4 py-4 hover:bg-gray-50">
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${b.is_active ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
+                    <Building2 size={20} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-800">{b.name}</p>
+                    <p className="text-xs text-gray-400">{b.address || 'No address'}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${b.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {b.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                  <div className="flex gap-1">
+                    <button onClick={() => startEdit(b)} className="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50" title="Edit">
+                      <Edit2 size={16} />
+                    </button>
+                    <button onClick={() => handleToggleActive(b.id, b.is_active)}
+                      className={`p-2 rounded-lg ${b.is_active ? 'text-green-500 hover:text-orange-600 hover:bg-orange-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
+                      title={b.is_active ? 'Deactivate' : 'Activate'}>
+                      {b.is_active ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                    </button>
+                    <button onClick={() => handleDelete(b)}
+                      className="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                      title="Delete">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-800">{b.name}</p>
-                  <p className="text-xs text-gray-400">{b.address || 'No address'}</p>
-                </div>
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${b.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {b.is_active ? 'Active' : 'Inactive'}
-                </span>
-                <div className="flex gap-1">
-                  <button onClick={() => startEdit(b)} className="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50">
-                    <Edit2 size={16} />
-                  </button>
-                  <button onClick={() => handleToggleActive(b.id, b.is_active)}
-                    className={`p-2 rounded-lg ${b.is_active ? 'text-gray-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
-                    title={b.is_active ? 'Deactivate' : 'Activate'}>
-                    <Trash2 size={16} />
-                  </button>
+                {/* Shift Times */}
+                <div className="mt-3 ml-14 flex items-start gap-2">
+                  <Clock size={14} className="text-gray-400 mt-0.5 shrink-0" />
+                  <div className="flex flex-wrap gap-2">
+                    {getShiftsForBranch(b.name).map(shift => (
+                      <span key={shift.number} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-lg">
+                        <span className="font-medium">{shift.label}:</span> {formatShiftTime(shift)}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}

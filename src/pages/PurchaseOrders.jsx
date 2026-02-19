@@ -22,19 +22,24 @@ export default function PurchaseOrders() {
 
   const fetchOrders = async () => {
     setLoading(true)
-    let query = supabase
-      .from('purchase_orders')
-      .select('*, fuel_types(short_code, name), cashiers(full_name), customers(name, company)')
-      .gte('created_at', startDate + 'T00:00:00')
-      .lte('created_at', endDate + 'T23:59:59')
-      .order('created_at', { ascending: false })
+    try {
+      let query = supabase
+        .from('purchase_orders')
+        .select('*, fuel_types(short_code, name), cashiers(full_name), customers(name, company)')
+        .gte('created_at', startDate + 'T00:00:00')
+        .lte('created_at', endDate + 'T23:59:59')
+        .order('created_at', { ascending: false })
 
-    if (statusFilter !== 'all') query = query.eq('status', statusFilter)
-    if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
+      if (statusFilter !== 'all') query = query.eq('status', statusFilter)
+      if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
 
-    const { data, error } = await query
-    if (!error) setOrders(data || [])
-    setLoading(false)
+      const { data, error } = await query
+      if (!error) setOrders(data || [])
+    } catch (err) {
+      console.error('PurchaseOrders fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const filtered = orders.filter(o =>

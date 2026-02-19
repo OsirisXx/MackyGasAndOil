@@ -31,19 +31,24 @@ export default function Attendance() {
 
   const fetchRecords = async () => {
     setLoading(true)
-    let query = supabase
-      .from('attendance')
-      .select('*, cashiers(full_name)')
-      .gte('shift_date', startDate)
-      .lte('shift_date', endDate)
-      .order('check_in', { ascending: false })
+    try {
+      let query = supabase
+        .from('attendance')
+        .select('*, cashiers(full_name)')
+        .gte('shift_date', startDate)
+        .lte('shift_date', endDate)
+        .order('check_in', { ascending: false })
 
-    if (filterCashier) query = query.eq('cashier_id', filterCashier)
-    if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
+      if (filterCashier) query = query.eq('cashier_id', filterCashier)
+      if (selectedBranchId) query = query.eq('branch_id', selectedBranchId)
 
-    const { data, error } = await query
-    if (!error) setRecords(data || [])
-    setLoading(false)
+      const { data, error } = await query
+      if (!error) setRecords(data || [])
+    } catch (err) {
+      console.error('Attendance fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const getDuration = (checkIn, checkOut) => {

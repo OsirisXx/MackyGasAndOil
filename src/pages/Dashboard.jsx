@@ -60,65 +60,63 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     setLoading(true)
-    const startOfDay = today + 'T00:00:00'
-    const endOfDay = today + 'T23:59:59'
+    try {
+      const startOfDay = today + 'T00:00:00'
+      const endOfDay = today + 'T23:59:59'
 
-    // Fetch today's cash sales
-    let salesQ = supabase.from('cash_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
-    if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
-    const { data: cashSales } = await salesQ
+      // Fetch today's cash sales
+      let salesQ = supabase.from('cash_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
+      if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
 
-    // Fetch today's purchase orders
-    let poQ = supabase.from('purchase_orders').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
-    if (selectedBranchId) poQ = poQ.eq('branch_id', selectedBranchId)
-    const { data: purchaseOrders } = await poQ
+      // Fetch today's purchase orders
+      let poQ = supabase.from('purchase_orders').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
+      if (selectedBranchId) poQ = poQ.eq('branch_id', selectedBranchId)
 
-    // Fetch active cashiers count
-    let cashierQ = supabase.from('cashiers').select('*', { count: 'exact', head: true }).eq('is_active', true)
-    if (selectedBranchId) cashierQ = cashierQ.eq('branch_id', selectedBranchId)
-    const { count: activeCashiers } = await cashierQ
+      // Fetch active cashiers count
+      let cashierQ = supabase.from('cashiers').select('*', { count: 'exact', head: true }).eq('is_active', true)
+      if (selectedBranchId) cashierQ = cashierQ.eq('branch_id', selectedBranchId)
 
-    // Fetch today's product sales
-    let productQ = supabase.from('product_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
-    if (selectedBranchId) productQ = productQ.eq('branch_id', selectedBranchId)
-    const { data: productSales } = await productQ
+      // Fetch today's product sales
+      let productQ = supabase.from('product_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
+      if (selectedBranchId) productQ = productQ.eq('branch_id', selectedBranchId)
 
-    // Calculate totals
-    const totalCashSales = (cashSales || []).reduce((sum, s) => sum + parseFloat(s.amount || 0), 0)
-    const totalPurchaseOrders = (purchaseOrders || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
-    const unpaidPurchaseOrders = (purchaseOrders || [])
-      .filter(p => p.status === 'unpaid')
-      .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
-    const totalProductSales = (productSales || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0)
+      // Recent sales
+      let recentCashQ = supabase.from('cash_sales').select('*, fuel_types(short_code), cashiers(full_name)').order('created_at', { ascending: false }).limit(5)
+      if (selectedBranchId) recentCashQ = recentCashQ.eq('branch_id', selectedBranchId)
 
-    setStats({
-      totalCashSales,
-      totalPurchaseOrders,
-      unpaidPurchaseOrders,
-      totalProductSales,
-      cashSalesCount: (cashSales || []).length,
-      poCount: (purchaseOrders || []).length,
-      productSalesCount: (productSales || []).length,
-      activeCashiers: activeCashiers || 0,
-    })
+      let recentProdQ = supabase.from('product_sales').select('*, cashiers:cashier_id(full_name)').order('created_at', { ascending: false }).limit(5)
+      if (selectedBranchId) recentProdQ = recentProdQ.eq('branch_id', selectedBranchId)
 
-    // Recent sales (last 5 combined from cash_sales + product_sales)
-    let recentCashQ = supabase.from('cash_sales').select('*, fuel_types(short_code), cashiers(full_name)').order('created_at', { ascending: false }).limit(5)
-    if (selectedBranchId) recentCashQ = recentCashQ.eq('branch_id', selectedBranchId)
+      const [{ data: cashSales }, { data: purchaseOrders }, { count: activeCashiers }, { data: productSales }, { data: recentCash }, { data: recentProd }] = await Promise.all([salesQ, poQ, cashierQ, productQ, recentCashQ, recentProdQ])
 
-    let recentProdQ = supabase.from('product_sales').select('*, cashiers:cashier_id(full_name)').order('created_at', { ascending: false }).limit(5)
-    if (selectedBranchId) recentProdQ = recentProdQ.eq('branch_id', selectedBranchId)
+      const totalCashSales = (cashSales || []).reduce((sum, s) => sum + parseFloat(s.amount || 0), 0)
+      const totalPurchaseOrders = (purchaseOrders || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
+      const unpaidPurchaseOrders = (purchaseOrders || [])
+        .filter(p => p.status === 'unpaid')
+        .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
+      const totalProductSales = (productSales || []).reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0)
 
-    const [{ data: recentCash }, { data: recentProd }] = await Promise.all([recentCashQ, recentProdQ])
+      setStats({
+        totalCashSales,
+        totalPurchaseOrders,
+        unpaidPurchaseOrders,
+        totalProductSales,
+        cashSalesCount: (cashSales || []).length,
+        poCount: (purchaseOrders || []).length,
+        productSalesCount: (productSales || []).length,
+        activeCashiers: activeCashiers || 0,
+      })
 
-    // Combine and sort by date, take latest 5
-    const combined = [
-      ...(recentCash || []).map(s => ({ ...s, _type: 'cash' })),
-      ...(recentProd || []).map(s => ({ ...s, _type: 'product' })),
-    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5)
-    setRecentSales(combined)
-
-    setLoading(false)
+      const combined = [
+        ...(recentCash || []).map(s => ({ ...s, _type: 'cash' })),
+        ...(recentProd || []).map(s => ({ ...s, _type: 'product' })),
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5)
+      setRecentSales(combined)
+    } catch (err) {
+      console.error('Dashboard fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {

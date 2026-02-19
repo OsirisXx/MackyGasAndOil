@@ -19,55 +19,49 @@ export default function Reports() {
 
   const fetchReports = async () => {
     setLoading(true)
-    const start = startDate + 'T00:00:00'
-    const end = endDate + 'T23:59:59'
+    try {
+      const start = startDate + 'T00:00:00'
+      const end = endDate + 'T23:59:59'
 
-    // Fetch cash sales
-    let salesQ = supabase.from('cash_sales').select('*, cashiers(full_name), fuel_types(short_code)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
-    if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
-    const { data: cashSales } = await salesQ
+      let salesQ = supabase.from('cash_sales').select('*, cashiers(full_name), fuel_types(short_code)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
+      if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
 
-    // Fetch purchase orders
-    let poQ = supabase.from('purchase_orders').select('*, cashiers(full_name), fuel_types(short_code)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
-    if (selectedBranchId) poQ = poQ.eq('branch_id', selectedBranchId)
-    const { data: purchaseOrders } = await poQ
+      let poQ = supabase.from('purchase_orders').select('*, cashiers(full_name), fuel_types(short_code)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false })
+      if (selectedBranchId) poQ = poQ.eq('branch_id', selectedBranchId)
 
-    const sales = cashSales || []
-    const pos = purchaseOrders || []
+      const [{ data: cashSales }, { data: purchaseOrders }] = await Promise.all([salesQ, poQ])
 
-    // Calculate summary
-    const totalCashSales = sales.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
-    const totalPurchaseOrders = pos.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
-    const totalUnpaidPOs = pos.filter(p => p.status === 'unpaid').reduce((s, r) => s + parseFloat(r.amount || 0), 0)
-    const uniqueCashiers = new Set([...sales.map(s => s.cashier_id), ...pos.map(p => p.cashier_id)]).size
+      const sales = cashSales || []
+      const pos = purchaseOrders || []
 
-    setSummary({
-      totalCashSales,
-      totalPurchaseOrders,
-      totalUnpaidPOs,
-      cashSalesCount: sales.length,
-      poCount: pos.length,
-      uniqueCashiers,
-    })
+      const totalCashSales = sales.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
+      const totalPurchaseOrders = pos.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
+      const totalUnpaidPOs = pos.filter(p => p.status === 'unpaid').reduce((s, r) => s + parseFloat(r.amount || 0), 0)
+      const uniqueCashiers = new Set([...sales.map(s => s.cashier_id), ...pos.map(p => p.cashier_id)]).size
 
-    // Group by date
-    const days = eachDayOfInterval({ start: parseISO(startDate), end: parseISO(endDate) })
-    const grouped = days.map(day => {
-      const dateStr = format(day, 'yyyy-MM-dd')
-      const daySales = sales.filter(s => s.created_at.startsWith(dateStr))
-      const dayPOs = pos.filter(p => p.created_at.startsWith(dateStr))
-      return {
-        date: dateStr,
-        cashSales: daySales.reduce((s, r) => s + parseFloat(r.amount || 0), 0),
-        purchaseOrders: dayPOs.reduce((s, r) => s + parseFloat(r.amount || 0), 0),
-        cashSalesCount: daySales.length,
-        poCount: dayPOs.length,
-        total: daySales.reduce((s, r) => s + parseFloat(r.amount || 0), 0) + dayPOs.reduce((s, r) => s + parseFloat(r.amount || 0), 0),
-      }
-    }).filter(d => d.cashSalesCount > 0 || d.poCount > 0).reverse()
+      setSummary({ totalCashSales, totalPurchaseOrders, totalUnpaidPOs, cashSalesCount: sales.length, poCount: pos.length, uniqueCashiers })
 
-    setDailyData(grouped)
-    setLoading(false)
+      const days = eachDayOfInterval({ start: parseISO(startDate), end: parseISO(endDate) })
+      const grouped = days.map(day => {
+        const dateStr = format(day, 'yyyy-MM-dd')
+        const daySales = sales.filter(s => s.created_at.startsWith(dateStr))
+        const dayPOs = pos.filter(p => p.created_at.startsWith(dateStr))
+        return {
+          date: dateStr,
+          cashSales: daySales.reduce((s, r) => s + parseFloat(r.amount || 0), 0),
+          purchaseOrders: dayPOs.reduce((s, r) => s + parseFloat(r.amount || 0), 0),
+          cashSalesCount: daySales.length,
+          poCount: dayPOs.length,
+          total: daySales.reduce((s, r) => s + parseFloat(r.amount || 0), 0) + dayPOs.reduce((s, r) => s + parseFloat(r.amount || 0), 0),
+        }
+      }).filter(d => d.cashSalesCount > 0 || d.poCount > 0).reverse()
+
+      setDailyData(grouped)
+    } catch (err) {
+      console.error('Reports fetch error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const setPreset = (preset) => {

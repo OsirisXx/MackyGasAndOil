@@ -16,8 +16,13 @@ export default function FuelManagement() {
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchFuelTypes(), fetchPriceHistory()])
-      setLoading(false)
+      try {
+        await Promise.all([fetchFuelTypes(), fetchPriceHistory()])
+      } catch (err) {
+        console.error('FuelManagement fetch error:', err)
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [])

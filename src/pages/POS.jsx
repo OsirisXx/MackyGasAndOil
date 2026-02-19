@@ -90,31 +90,36 @@ export default function POS() {
   const fetchTodayData = async () => {
     if (!cashier) return
     setLoadingData(true)
-    const today = format(new Date(), 'yyyy-MM-dd')
-    const [salesRes, poRes, prodRes] = await Promise.all([
-      supabase.from('cash_sales')
-        .select('*, fuel_types(short_code, name)')
-        .eq('cashier_id', cashier.id)
-        .gte('created_at', today + 'T00:00:00')
-        .lte('created_at', today + 'T23:59:59')
-        .order('created_at', { ascending: false }),
-      supabase.from('purchase_orders')
-        .select('*, fuel_types(short_code, name)')
-        .eq('cashier_id', cashier.id)
-        .gte('created_at', today + 'T00:00:00')
-        .lte('created_at', today + 'T23:59:59')
-        .order('created_at', { ascending: false }),
-      supabase.from('product_sales')
-        .select('*')
-        .eq('cashier_id', cashier.id)
-        .gte('created_at', today + 'T00:00:00')
-        .lte('created_at', today + 'T23:59:59')
-        .order('created_at', { ascending: false }),
-    ])
-    setTodaySales(salesRes.data || [])
-    setTodayPOs(poRes.data || [])
-    setTodayProductSales(prodRes.data || [])
-    setLoadingData(false)
+    try {
+      const today = format(new Date(), 'yyyy-MM-dd')
+      const [salesRes, poRes, prodRes] = await Promise.all([
+        supabase.from('cash_sales')
+          .select('*, fuel_types(short_code, name)')
+          .eq('cashier_id', cashier.id)
+          .gte('created_at', today + 'T00:00:00')
+          .lte('created_at', today + 'T23:59:59')
+          .order('created_at', { ascending: false }),
+        supabase.from('purchase_orders')
+          .select('*, fuel_types(short_code, name)')
+          .eq('cashier_id', cashier.id)
+          .gte('created_at', today + 'T00:00:00')
+          .lte('created_at', today + 'T23:59:59')
+          .order('created_at', { ascending: false }),
+        supabase.from('product_sales')
+          .select('*')
+          .eq('cashier_id', cashier.id)
+          .gte('created_at', today + 'T00:00:00')
+          .lte('created_at', today + 'T23:59:59')
+          .order('created_at', { ascending: false }),
+      ])
+      setTodaySales(salesRes.data || [])
+      setTodayPOs(poRes.data || [])
+      setTodayProductSales(prodRes.data || [])
+    } catch (err) {
+      console.error('POS fetch error:', err)
+    } finally {
+      setLoadingData(false)
+    }
   }
 
   // Computed

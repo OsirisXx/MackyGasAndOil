@@ -9,7 +9,7 @@ export const useBranchStore = create(
       selectedBranchId: null, // null = "All Branches"
       loading: false,
       lastFetch: 0,
-      initialized: false,
+      initialized: true,
 
       fetchBranches: async (force = false) => {
         // Prevent redundant fetches within 5 seconds
@@ -33,10 +33,6 @@ export const useBranchStore = create(
             return
           }
           set({ branches: data || [], loading: false, lastFetch: now, initialized: true })
-          // Auto-select first branch if none selected
-          if (!get().selectedBranchId && data?.length > 0) {
-            set({ selectedBranchId: data[0].id })
-          }
         } catch (e) {
           console.warn('Failed to fetch branches:', e)
           set({ branches: [], loading: false, lastFetch: now, initialized: true })
@@ -62,15 +58,11 @@ export const useBranchStore = create(
     {
       name: 'macky-pos-branch',
       partialize: (state) => ({
-        selectedBranchId: state.selectedBranchId,
         branches: state.branches,
       }),
     }
   )
 )
 
-// Set initialized after store is created and hydrated
-// Use queueMicrotask to ensure it runs after hydration completes
-queueMicrotask(() => {
-  useBranchStore.setState({ initialized: true })
-})
+// Fetch branches on app start
+useBranchStore.getState().fetchBranches()

@@ -210,8 +210,8 @@ export default function Customers() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Contact Number</label>
-                <input type="text" value={form.contact_number} onChange={e => setForm(p => ({ ...p, contact_number: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="tel" value={form.contact_number} onChange={e => { const val = e.target.value.replace(/[^0-9]/g, ''); setForm(p => ({ ...p, contact_number: val })) }}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. 09171234567" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Address</label>
