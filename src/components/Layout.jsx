@@ -112,7 +112,7 @@ export default function Layout({ children }) {
                 to={item.path}
                 onClick={() => setMobileOpen(false)}
                 className={`
-                  flex items-center gap-3 mx-2 px-3 py-2.5 rounded-lg mb-1
+                  flex items-center mx-2 px-3 py-2.5 rounded-lg mb-1
                   transition-all duration-200 text-sm
                   ${active
                     ? 'bg-blue-700/50 text-white font-medium shadow-sm'
@@ -122,8 +122,10 @@ export default function Layout({ children }) {
                 `}
                 title={collapsed ? item.label : undefined}
               >
-                <Icon size={20} className="shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
+                <span className="w-5 flex items-center justify-center shrink-0">
+                  <Icon size={20} />
+                </span>
+                {!collapsed && <span className="ml-3">{item.label}</span>}
               </Link>
             )
           })}
