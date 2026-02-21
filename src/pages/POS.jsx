@@ -6,15 +6,17 @@ import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 import {
   Fuel, DollarSign, Plus, ShoppingCart, FileText,
-  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus
+  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
+import { useConnectionStatus } from '../hooks/useConnectionStatus'
 
 export default function POS() {
   const { cashier, cashierCheckOut } = useAuthStore()
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
   const { products, fetchProducts } = useProductStore()
+  const { isConnected, isOnline, isSupabaseConnected } = useConnectionStatus()
 
   // Transaction form
   const [fuelTypeId, setFuelTypeId] = useState('')
@@ -131,9 +133,13 @@ export default function POS() {
   const totalPOToday = useMemo(() =>
     todayPOs.reduce((s, t) => s + parseFloat(t.amount || 0), 0), [todayPOs])
 
-  const handleRecordSale = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!amount || parseFloat(amount) <= 0) return toast.error('Enter a valid amount')
+    if (!isConnected) {
+      toast.error('No connection. Please check your internet and try again.')
+      return
+    }
+    if (!fuelTypeId || !amount) return toast.error('Please fill all required fields')
     setSaving(true)
     try {
       const { error } = await supabase.from('cash_sales').insert({
@@ -171,7 +177,11 @@ export default function POS() {
 
   const handleCreatePO = async (e) => {
     e.preventDefault()
-    if (!poCustomer) return toast.error('Customer name is required')
+    if (!isConnected) {
+      toast.error('No connection. Please check your internet and try again.')
+      return
+    }
+    if (!poCustomer || !poAmount) return toast.error('Please fill all required fields')
     if (!poAmount || parseFloat(poAmount) <= 0) return toast.error('Enter a valid amount')
     setSaving(true)
     try {
@@ -278,6 +288,10 @@ export default function POS() {
   , [cart])
 
   const handleProductSale = async () => {
+    if (!isConnected) {
+      toast.error('No connection. Please check your internet and try again.')
+      return
+    }
     if (cart.length === 0) return toast.error('Cart is empty')
     setSaving(true)
     try {
@@ -387,6 +401,21 @@ export default function POS() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {/* Connection Status Indicator */}
+          {!isConnected && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg">
+              <WifiOff size={14} className="text-red-600" />
+              <span className="text-xs font-medium text-red-600">
+                {!isOnline ? 'No Internet' : 'Database Offline'}
+              </span>
+            </div>
+          )}
+          {isConnected && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
+              <Wifi size={14} className="text-green-600" />
+              <span className="text-xs font-medium text-green-600">Connected</span>
+            </div>
+          )}
           <div className="text-right">
             <p className="text-sm font-medium text-gray-700">{cashier?.full_name}</p>
             <p className="text-[10px] text-gray-400">{format(new Date(), 'MMM d, yyyy — h:mm a')}</p>
@@ -450,7 +479,7 @@ export default function POS() {
                   </div>
                 </div>
 
-                <form onSubmit={handleRecordSale} className="space-y-3">
+                <form onSubmit={handleSubmit} className="space-y-3">
                   {/* Fuel Type Quick Select */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-2">Fuel Type</label>
