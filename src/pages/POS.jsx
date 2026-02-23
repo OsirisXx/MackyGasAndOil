@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 import {
   Fuel, DollarSign, Plus, ShoppingCart, FileText,
-  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi
+  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi, Vault
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
@@ -48,6 +48,12 @@ export default function POS() {
   const [productSearch, setProductSearch] = useState('')
   const [cart, setCart] = useState([]) // { product, quantity }
   const [productPaymentMethod, setProductPaymentMethod] = useState('cash')
+
+  // Cash deposit state
+  const [showDeposit, setShowDeposit] = useState(false)
+  const [depositAmount, setDepositAmount] = useState('')
+  const [depositNotes, setDepositNotes] = useState('')
+  const [todayDeposits, setTodayDeposits] = useState([])
 
   useEffect(() => {
     fetchFuelTypes()
@@ -94,7 +100,7 @@ export default function POS() {
     setLoadingData(true)
     try {
       const today = format(new Date(), 'yyyy-MM-dd')
-      const [salesRes, poRes, prodRes] = await Promise.all([
+      const [salesRes, poRes, prodRes, depositRes] = await Promise.all([
         supabase.from('cash_sales')
           .select('*, fuel_types(short_code, name)')
           .eq('cashier_id', cashier.id)
@@ -113,10 +119,17 @@ export default function POS() {
           .gte('created_at', today + 'T00:00:00')
           .lte('created_at', today + 'T23:59:59')
           .order('created_at', { ascending: false }),
+        supabase.from('cash_deposits')
+          .select('*')
+          .eq('cashier_id', cashier.id)
+          .gte('deposit_date', today + 'T00:00:00')
+          .lte('deposit_date', today + 'T23:59:59')
+          .order('deposit_date', { ascending: false }),
       ])
       setTodaySales(salesRes.data || [])
       setTodayPOs(poRes.data || [])
       setTodayProductSales(prodRes.data || [])
+      setTodayDeposits(depositRes.data || [])
     } catch (err) {
       console.error('POS fetch error:', err)
     } finally {
@@ -214,6 +227,43 @@ export default function POS() {
       setPoPlate('')
       setPoNotes('')
       setShowPO(false)
+      fetchTodayData()
+    } catch (err) {
+      toast.error(err.message)
+    }
+    setSaving(false)
+  }
+
+  const handleCashDeposit = async (e) => {
+    e.preventDefault()
+    if (!isConnected) {
+      toast.error('No connection. Please check your internet and try again.')
+      return
+    }
+    if (!depositAmount || parseFloat(depositAmount) <= 0) {
+      return toast.error('Please enter a valid deposit amount')
+    }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('cash_deposits').insert({
+        cashier_id: cashier.id,
+        branch_id: cashier.branch_id || null,
+        amount: parseFloat(depositAmount),
+        notes: depositNotes || null,
+        created_by: cashier.user_id,
+      })
+      if (error) throw error
+      toast.success(`₱${parseFloat(depositAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} deposited to vault!`)
+      logAudit('create', 'cash_deposit', `Cash deposit of ₱${parseFloat(depositAmount).toFixed(2)}`, {
+        newValues: { amount: parseFloat(depositAmount) },
+        branchId: cashier.branch_id,
+        branchName: cashier.branches?.name,
+        cashierId: cashier.id,
+        cashierName: cashier.full_name,
+      })
+      setDepositAmount('')
+      setDepositNotes('')
+      setShowDeposit(false)
       fetchTodayData()
     } catch (err) {
       toast.error(err.message)
@@ -475,6 +525,10 @@ export default function POS() {
                     <button onClick={() => setShowPO(true)}
                       className="text-xs text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1">
                       <CreditCard size={14} /> Purchase Order
+                    </button>
+                    <button onClick={() => setShowDeposit(true)}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+                      <Vault size={14} /> Cash Deposit
                     </button>
                   </div>
                 </div>
@@ -936,6 +990,63 @@ export default function POS() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cash Deposit Modal */}
+      {showDeposit && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <Vault size={20} className="text-blue-600" />
+                <h2 className="text-lg font-semibold text-gray-800">Cash Deposit to Vault</h2>
+              </div>
+              <button onClick={() => setShowDeposit(false)}
+                className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
+                <Plus size={20} className="rotate-45 text-gray-400" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCashDeposit} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Deposit Amount (₱) *</label>
+                <input type="number" step="0.01" value={depositAmount}
+                  onChange={e => setDepositAmount(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl text-2xl font-bold text-center text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="0.00" required autoFocus />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Notes (Optional)</label>
+                <textarea value={depositNotes} onChange={e => setDepositNotes(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  placeholder="Add any notes about this deposit..."
+                  rows="3" />
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-xs text-blue-800">
+                  <strong>Note:</strong> This deposit will be recorded and cannot be edited by you. Only admins can modify deposit records.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowDeposit(false)}
+                  className="flex-1 py-3 border border-gray-200 text-gray-600 font-semibold rounded-xl hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+                <button type="submit" disabled={saving || !depositAmount}
+                  className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50">
+                  {saving ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <><Vault size={18} /> Deposit Cash</>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

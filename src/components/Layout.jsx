@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Fuel, FileText, Users, Package,
   ChevronLeft, ChevronRight, LogOut, Menu, X,
   Receipt, DollarSign, Settings, TrendingUp,
-  QrCode, Clock, ShoppingCart, Building2, ClipboardList, Gauge
+  QrCode, Clock, ShoppingCart, Building2, ClipboardList, Gauge, Vault
 } from 'lucide-react'
 
 const adminNav = [
@@ -17,6 +17,7 @@ const adminNav = [
   { path: '/admin/accountability-report', label: 'Accountability Report', icon: FileText },
   { path: '/admin/fuel-management', label: 'Fuel Management', icon: Fuel },
   { path: '/admin/shift-readings', label: 'Shift Readings', icon: Gauge },
+  { path: '/admin/cash-deposits', label: 'Cash Deposits', icon: Vault },
   { path: '/admin/customers', label: 'Customers', icon: Users },
   { path: '/admin/products', label: 'Products & Inventory', icon: Package },
   { path: '/admin/purchase-orders', label: 'Purchase Orders', icon: Receipt },

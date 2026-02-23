@@ -20,6 +20,7 @@ import BranchManagement from './pages/BranchManagement'
 import AuditLog from './pages/AuditLog'
 import ShiftReadings from './pages/ShiftReadings'
 import AccountabilityReport from './pages/AccountabilityReport'
+import CashDeposits from './pages/CashDeposits'
 
 function App() {
   const { initialize, loading, mode } = useAuthStore()
@@ -70,6 +71,7 @@ function App() {
               <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/shift-readings" element={<ShiftReadings />} />
               <Route path="/accountability-report" element={<AccountabilityReport />} />
+              <Route path="/cash-deposits" element={<CashDeposits />} />
             </Routes>
           </Layout>
         </AdminRoute>
