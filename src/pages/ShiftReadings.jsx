@@ -81,7 +81,6 @@ export default function ShiftReadings() {
         shift_number: selectedShift,
         fuel_type_id: fuelId,
         beginning_reading: beginReading,
-        price_per_liter: fuel?.current_price || 0,
         status: 'open',
       })
       .select()
@@ -232,7 +231,12 @@ export default function ShiftReadings() {
 
   // Calculate totals
   const totalLiters = readings.reduce((s, r) => s + parseFloat(r.liters_dispensed || 0), 0)
-  const totalValue = readings.reduce((s, r) => s + parseFloat(r.total_value || 0), 0)
+  const totalValue = readings.reduce((s, r) => {
+    const fuel = fuelTypes.find(f => f.id === r.fuel_type_id)
+    const liters = parseFloat(r.liters_dispensed || 0)
+    const price = parseFloat(fuel?.current_price || 0)
+    return s + (liters * price)
+  }, 0)
   const openCount = readings.filter(r => r.status === 'open').length
   const closedCount = readings.filter(r => r.status === 'closed').length
 
@@ -340,7 +344,7 @@ export default function ShiftReadings() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
                   {/* Beginning Reading */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Beginning Reading</label>
@@ -377,11 +381,19 @@ export default function ShiftReadings() {
                     </div>
                   </div>
 
+                  {/* Price Per Liter */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Price/Liter</label>
+                    <div className="px-3 py-2 bg-purple-50 rounded-lg text-sm font-bold text-purple-700 font-mono">
+                      ₱{fuel.current_price ? parseFloat(fuel.current_price).toFixed(2) : '—'}
+                    </div>
+                  </div>
+
                   {/* Total Value */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Total Value</label>
                     <div className="px-3 py-2 bg-green-50 rounded-lg text-sm font-bold text-green-700">
-                      ₱{reading?.total_value ? parseFloat(reading.total_value).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
+                      ₱{reading?.liters_dispensed && fuel.current_price ? (parseFloat(reading.liters_dispensed) * parseFloat(fuel.current_price)).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
                     </div>
                   </div>
                 </div>

@@ -78,7 +78,13 @@ export default function AccountabilityReport() {
   // Calculate totals
   const getFuelReading = (fuelId) => fuelReadings.find(r => r.fuel_type_id === fuelId)
   
-  const totalFuelSales = fuelReadings.reduce((s, r) => s + parseFloat(r.total_value || 0), 0)
+  // Calculate total fuel sales using current fuel prices
+  const totalFuelSales = fuelReadings.reduce((s, r) => {
+    const fuel = fuelTypes.find(f => f.id === r.fuel_type_id)
+    const liters = parseFloat(r.liters_dispensed || 0)
+    const price = parseFloat(fuel?.current_price || 0)
+    return s + (liters * price)
+  }, 0)
   const totalOilLubes = productSales.oil_lubes
   const totalAccessories = productSales.accessories
   const totalServices = productSales.services
@@ -268,9 +274,8 @@ export default function AccountabilityReport() {
             <tr>
               <td className="border border-gray-300 p-2 font-medium">PRICE / LITER</td>
               {fuelTypes.map(f => {
-                const r = getFuelReading(f.id)
                 return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
-                  {r?.price_per_liter ? parseFloat(r.price_per_liter).toFixed(2) : parseFloat(f.current_price).toFixed(2)}
+                  {parseFloat(f.current_price).toFixed(2)}
                 </td>
               })}
             </tr>
@@ -278,8 +283,9 @@ export default function AccountabilityReport() {
               <td className="border border-gray-300 p-2">TOTAL FUEL</td>
               {fuelTypes.map(f => {
                 const r = getFuelReading(f.id)
+                const totalValue = r ? (parseFloat(r.liters_dispensed || 0) * parseFloat(f.current_price)) : 0
                 return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
-                  {r?.total_value ? parseFloat(r.total_value).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
+                  {totalValue > 0 ? totalValue.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
                 </td>
               })}
             </tr>
