@@ -448,7 +448,7 @@ export default function DailyReport() {
 
       {/* Table View */}
       {viewMode === 'table' && (
-        <div ref={printRef} className="bg-white rounded-xl border border-gray-100 shadow-sm p-8">
+        <div ref={printRef} className="bg-white rounded-xl border border-gray-100 shadow-sm p-8" style={{fontFamily: 'Arial, sans-serif'}}>
           {/* Header */}
           <div className="header mb-6">
             <div className="flex items-center justify-center gap-4 mb-2">
@@ -469,33 +469,33 @@ export default function DailyReport() {
           {/* Cash Sales */}
           {cashSales.length > 0 && (
             <>
-              <div className="section-title">CASH SALES</div>
-              <table>
+              <div className="section-title" style={{fontWeight: 'bold', margin: '20px 0 10px', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #000', paddingBottom: '4px'}}>CASH SALES</div>
+              <table style={{width: '100%', borderCollapse: 'collapse', marginBottom: '20px'}}>
                 <thead>
                   <tr>
-                    <th className="text-center" style={{width: '60px'}}>Time</th>
-                    <th>Cashier</th>
-                    <th className="text-center" style={{width: '80px'}}>Fuel Type</th>
-                    <th className="text-right" style={{width: '100px'}}>Liters</th>
-                    <th className="text-right" style={{width: '100px'}}>Amount</th>
-                    <th className="text-center" style={{width: '80px'}}>Payment</th>
+                    <th className="text-center" style={{width: '60px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Time</th>
+                    <th style={{border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase'}}>Cashier</th>
+                    <th className="text-center" style={{width: '80px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Fuel Type</th>
+                    <th className="text-right" style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Liters</th>
+                    <th className="text-right" style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Amount</th>
+                    <th className="text-center" style={{width: '80px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Payment</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cashSales.map(s => (
                     <tr key={s.id}>
-                      <td className="text-center">{format(new Date(s.created_at), 'h:mm a')}</td>
-                      <td>{s.cashiers?.full_name || 'Unknown'}</td>
-                      <td className="text-center">{s.fuel_types?.short_code || '—'}</td>
-                      <td className="text-right">{s.liters ? parseFloat(s.liters).toFixed(3) : '—'}</td>
-                      <td className="text-right">₱{parseFloat(s.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-center">{s.payment_method}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center', whiteSpace: 'nowrap'}}>{format(new Date(s.created_at), 'h:mm a')}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px'}}>{s.cashiers?.full_name || 'Unknown'}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>{s.fuel_types?.short_code || '—'}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>{s.liters ? parseFloat(s.liters).toFixed(3) : '—'}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>₱{parseFloat(s.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>{s.payment_method}</td>
                     </tr>
                   ))}
-                  <tr className="total-row">
-                    <td colSpan="4" className="text-right font-bold">TOTAL CASH SALES:</td>
-                    <td className="text-right font-bold">₱{totalCashSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                    <td></td>
+                  <tr style={{background: '#f5f5f5', borderTop: '2px solid #000'}}>
+                    <td colSpan="4" style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold'}}>TOTAL CASH SALES:</td>
+                    <td style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'Courier New, monospace'}}>₱{totalCashSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td style={{border: '1px solid #333', padding: '8px'}}></td>
                   </tr>
                 </tbody>
               </table>
@@ -505,35 +505,35 @@ export default function DailyReport() {
           {/* Product Sales */}
           {productSales.length > 0 && (
             <>
-              <div className="section-title">PRODUCT SALES</div>
-              <table>
+              <div className="section-title" style={{fontWeight: 'bold', margin: '20px 0 10px', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #000', paddingBottom: '4px'}}>PRODUCT SALES</div>
+              <table style={{width: '100%', borderCollapse: 'collapse', marginBottom: '20px'}}>
                 <thead>
                   <tr>
-                    <th className="text-center" style={{width: '60px'}}>Time</th>
-                    <th>Cashier</th>
-                    <th>Product</th>
-                    <th className="text-center" style={{width: '60px'}}>Qty</th>
-                    <th className="text-right" style={{width: '100px'}}>Unit Price</th>
-                    <th className="text-right" style={{width: '100px'}}>Total</th>
-                    <th className="text-center" style={{width: '80px'}}>Payment</th>
+                    <th style={{width: '60px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Time</th>
+                    <th style={{border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase'}}>Cashier</th>
+                    <th style={{border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase'}}>Product</th>
+                    <th style={{width: '60px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Qty</th>
+                    <th style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Unit Price</th>
+                    <th style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Total</th>
+                    <th style={{width: '80px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Payment</th>
                   </tr>
                 </thead>
                 <tbody>
                   {productSales.map(ps => (
                     <tr key={ps.id}>
-                      <td className="text-center">{format(new Date(ps.created_at), 'h:mm a')}</td>
-                      <td>{ps.cashier_name || 'Unknown'}</td>
-                      <td>{ps.product_name}</td>
-                      <td className="text-center">{ps.quantity}</td>
-                      <td className="text-right">₱{parseFloat(ps.unit_price).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-right">₱{parseFloat(ps.total_amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-center">{ps.payment_method}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center', whiteSpace: 'nowrap'}}>{format(new Date(ps.created_at), 'h:mm a')}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px'}}>{ps.cashier_name || 'Unknown'}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px'}}>{ps.product_name}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>{ps.quantity}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>₱{parseFloat(ps.unit_price).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>₱{parseFloat(ps.total_amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>{ps.payment_method}</td>
                     </tr>
                   ))}
-                  <tr className="total-row">
-                    <td colSpan="5" className="text-right font-bold">TOTAL PRODUCT SALES:</td>
-                    <td className="text-right font-bold">₱{totalProductSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                    <td></td>
+                  <tr style={{background: '#f5f5f5', borderTop: '2px solid #000'}}>
+                    <td colSpan="5" style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold'}}>TOTAL PRODUCT SALES:</td>
+                    <td style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'Courier New, monospace'}}>₱{totalProductSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td style={{border: '1px solid #333', padding: '8px'}}></td>
                   </tr>
                 </tbody>
               </table>
@@ -543,35 +543,35 @@ export default function DailyReport() {
           {/* Purchase Orders */}
           {purchaseOrders.length > 0 && (
             <>
-              <div className="section-title">PURCHASE ORDERS (CREDIT)</div>
-              <table>
+              <div className="section-title" style={{fontWeight: 'bold', margin: '20px 0 10px', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #000', paddingBottom: '4px'}}>PURCHASE ORDERS (CREDIT)</div>
+              <table style={{width: '100%', borderCollapse: 'collapse', marginBottom: '20px'}}>
                 <thead>
                   <tr>
-                    <th className="text-center" style={{width: '60px'}}>Time</th>
-                    <th>Cashier</th>
-                    <th>Customer</th>
-                    <th className="text-center" style={{width: '80px'}}>Fuel Type</th>
-                    <th className="text-right" style={{width: '100px'}}>Liters</th>
-                    <th className="text-right" style={{width: '100px'}}>Amount</th>
-                    <th className="text-center" style={{width: '80px'}}>Status</th>
+                    <th style={{width: '60px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Time</th>
+                    <th style={{border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase'}}>Cashier</th>
+                    <th style={{border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase'}}>Customer</th>
+                    <th style={{width: '80px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Fuel Type</th>
+                    <th style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Liters</th>
+                    <th style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Amount</th>
+                    <th style={{width: '80px', border: '1px solid #333', padding: '6px 8px', background: '#e8e8e8', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {purchaseOrders.map(po => (
                     <tr key={po.id}>
-                      <td className="text-center">{format(new Date(po.created_at), 'h:mm a')}</td>
-                      <td>{po.cashiers?.full_name || 'Unknown'}</td>
-                      <td>{po.customer_name}</td>
-                      <td className="text-center">{po.fuel_types?.short_code || '—'}</td>
-                      <td className="text-right">{po.liters ? parseFloat(po.liters).toFixed(3) : '—'}</td>
-                      <td className="text-right">₱{parseFloat(po.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-center">{po.status}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center', whiteSpace: 'nowrap'}}>{format(new Date(po.created_at), 'h:mm a')}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px'}}>{po.cashiers?.full_name || 'Unknown'}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px'}}>{po.customer_name}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>{po.fuel_types?.short_code || '—'}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>{po.liters ? parseFloat(po.liters).toFixed(3) : '—'}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>₱{parseFloat(po.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>{po.status}</td>
                     </tr>
                   ))}
-                  <tr className="total-row">
-                    <td colSpan="5" className="text-right font-bold">TOTAL PURCHASE ORDERS:</td>
-                    <td className="text-right font-bold">₱{totalPurchaseOrders.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                    <td></td>
+                  <tr style={{background: '#f5f5f5', borderTop: '2px solid #000'}}>
+                    <td colSpan="5" style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold'}}>TOTAL PURCHASE ORDERS:</td>
+                    <td style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'Courier New, monospace'}}>₱{totalPurchaseOrders.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td style={{border: '1px solid #333', padding: '8px'}}></td>
                   </tr>
                 </tbody>
               </table>
