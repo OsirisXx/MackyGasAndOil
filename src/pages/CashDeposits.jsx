@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useBranchStore } from '../stores/branchStore'
 import { format } from 'date-fns'
-import { Vault, Calendar, Filter, Edit2, Trash2, Save, X, Search } from 'lucide-react'
+import { Vault, Calendar, Filter, Edit2, Trash2, Save, X, Search, DollarSign, Receipt } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
 
@@ -140,9 +140,9 @@ export default function CashDeposits() {
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
           <Vault size={28} className="text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-800">Cash Deposits</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Cash Deposits & Remittance</h1>
         </div>
-        <p className="text-sm text-gray-500">View and manage cash deposits to the vault</p>
+        <p className="text-sm text-gray-500">Track cash deposits to vault and calculate remittance</p>
       </div>
 
       {/* Filters */}
@@ -196,15 +196,54 @@ export default function CashDeposits() {
         </div>
       </div>
 
-      {/* Summary Card */}
-      <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 mb-6 text-white">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-blue-100 text-sm mb-1">Total Deposits</p>
-            <p className="text-3xl font-bold">₱{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
-            <p className="text-blue-100 text-xs mt-1">{deposits.length} deposit{deposits.length !== 1 ? 's' : ''}</p>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* Total Deposits */}
+        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-5 text-white">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-white/20 rounded-lg">
+              <Vault size={20} />
+            </div>
+            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">{deposits.length} deposits</span>
           </div>
-          <Vault size={48} className="text-blue-300 opacity-50" />
+          <p className="text-blue-100 text-xs mb-1">Total Cash Deposits</p>
+          <p className="text-2xl font-bold">₱{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+          <p className="text-blue-100 text-[10px] mt-1">Input by cashier</p>
+        </div>
+
+        {/* Deposit List Preview */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Receipt size={18} className="text-gray-400" />
+            <h3 className="text-sm font-semibold text-gray-700">Deposit Breakdown</h3>
+          </div>
+          <div className="space-y-1 max-h-20 overflow-y-auto">
+            {deposits.length > 0 ? (
+              deposits.slice(0, 4).map((d, i) => (
+                <div key={d.id} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-500">Deposit {i + 1}</span>
+                  <span className="font-semibold text-gray-800">₱{parseFloat(d.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-gray-400 italic">No deposits yet</p>
+            )}
+            {deposits.length > 4 && (
+              <p className="text-[10px] text-gray-400 mt-1">+{deposits.length - 4} more...</p>
+            )}
+          </div>
+        </div>
+
+        {/* Remittance Info */}
+        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-5 text-white">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-white/20 rounded-lg">
+              <DollarSign size={20} />
+            </div>
+          </div>
+          <p className="text-green-100 text-xs mb-1">Total Remittance</p>
+          <p className="text-2xl font-bold">₱{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+          <p className="text-green-100 text-[10px] mt-1">Deposits - Cash on Hand</p>
         </div>
       </div>
 
