@@ -498,9 +498,9 @@ export default function POS() {
                       ))}
                     </div>
                     {fuelTypes.some(f => f.is_discounted) && (
-                      <details className="mt-2">
-                        <summary className="text-[10px] text-gray-400 cursor-pointer">Discounted prices</summary>
-                        <div className="grid grid-cols-3 gap-2 mt-2">
+                      <div className="mt-3">
+                        <p className="text-[10px] text-amber-600 font-medium mb-2">Discounted Prices</p>
+                        <div className="grid grid-cols-3 gap-2">
                           {fuelTypes.filter(f => f.is_discounted).map(ft => (
                             <button key={ft.id} type="button"
                               onClick={() => setFuelTypeId(ft.id)}
@@ -514,7 +514,7 @@ export default function POS() {
                             </button>
                           ))}
                         </div>
-                      </details>
+                      </div>
                     )}
                   </div>
 
