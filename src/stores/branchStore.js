@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { supabase } from '../lib/supabase'
+import { supabase, recoverSession, isAuthError } from '../lib/supabase'
 
 export const useBranchStore = create(
   persist(
@@ -17,7 +17,7 @@ export const useBranchStore = create(
           return
         }
         // Removed loading guard — it was silently dropping fetch calls during navigation
-        
+
         set({ loading: true })
         try {
           const { data, error } = await supabase
@@ -26,14 +26,30 @@ export const useBranchStore = create(
             .eq('is_active', true)
             .order('name')
           if (error) {
+            // If auth error, attempt session recovery and retry once
+            if (isAuthError(error)) {
+              console.warn('[BranchStore] Auth error, recovering session...')
+              const recovered = await recoverSession()
+              if (recovered) {
+                const { data: retryData, error: retryError } = await supabase
+                  .from('branches')
+                  .select('*')
+                  .eq('is_active', true)
+                  .order('name')
+                if (!retryError) {
+                  set({ branches: retryData || [], loading: false, lastFetch: now })
+                  return
+                }
+              }
+            }
             console.warn('branches table not available yet:', error.message)
-            set({ branches: [], loading: false, lastFetch: now })
+            set({ loading: false, lastFetch: now })
             return
           }
           set({ branches: data || [], loading: false, lastFetch: now })
         } catch (e) {
           console.warn('Failed to fetch branches:', e)
-          set({ branches: [], loading: false, lastFetch: now })
+          set({ loading: false, lastFetch: now })
         }
       },
 

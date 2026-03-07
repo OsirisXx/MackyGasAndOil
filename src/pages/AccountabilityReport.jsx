@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useFuelStore } from '../stores/fuelStore'
 import { useBranchStore } from '../stores/branchStore'
 import { getShiftsForBranch, formatShiftTime } from '../utils/shiftConfig'
+import { ensureCurrentShiftSnapshots, updateShiftReadings } from '../services/shiftService'
 import { format } from 'date-fns'
 import { FileText, Printer, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -23,6 +24,7 @@ export default function AccountabilityReport() {
   const [fuelReadings, setFuelReadings] = useState([])
   const [cashSales, setCashSales] = useState([])
   const [chargeInvoices, setChargeInvoices] = useState([])
+  const [calibrations, setCalibrations] = useState([])
   const [deposits, setDeposits] = useState([])
   const [checks, setChecks] = useState([])
   const [expenses, setExpenses] = useState([])
@@ -30,7 +32,11 @@ export default function AccountabilityReport() {
   const [productSales, setProductSales] = useState({ oil_lubes: 0, accessories: 0, services: 0, miscellaneous: 0 })
 
   useEffect(() => { fetchFuelTypes() }, [])
-  useEffect(() => { fetchAllData() }, [reportDate, selectedShift, selectedBranchId])
+  useEffect(() => { 
+    if (fuelTypes.length > 0) {
+      fetchAllData() 
+    }
+  }, [reportDate, selectedShift, selectedBranchId, fuelTypes])
 
   const fetchAllData = async () => {
     setLoading(true)
@@ -38,8 +44,26 @@ export default function AccountabilityReport() {
       const start = reportDate + 'T00:00:00'
       const end = reportDate + 'T23:59:59'
 
-      let readingsQ = supabase.from('shift_fuel_readings').select('*, fuel_types(name, short_code)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
-      if (selectedBranchId) readingsQ = readingsQ.eq('branch_id', selectedBranchId)
+      // Ensure shift snapshots exist and are updated
+      if (selectedBranchId) {
+        await ensureCurrentShiftSnapshots(selectedBranchId, selectedBranch?.name)
+        await updateShiftReadings(selectedBranchId)
+      }
+
+      // Fetch shift snapshots for the selected date/shift
+      let snapshotsQ = supabase
+        .from('shift_pump_snapshots')
+        .select('*, pumps(pump_name, pump_number, fuel_type, category, price_per_liter)')
+        .eq('shift_date', reportDate)
+        .eq('shift_number', selectedShift)
+      if (selectedBranchId) snapshotsQ = snapshotsQ.eq('branch_id', selectedBranchId)
+
+      // Also fetch pumps for fallback (if no snapshots exist yet)
+      let pumpsQ = supabase
+        .from('pumps')
+        .select('*')
+        .eq('is_active', true)
+      if (selectedBranchId) pumpsQ = pumpsQ.eq('branch_id', selectedBranchId)
 
       let salesQ = supabase.from('cash_sales').select('*').gte('created_at', start).lte('created_at', end)
       if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
@@ -59,11 +83,94 @@ export default function AccountabilityReport() {
       let purQ = supabase.from('purchases_disbursements').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) purQ = purQ.eq('branch_id', selectedBranchId)
 
-      const [{ data: readings }, { data: sales }, { data: ci }, { data: dep }, { data: chk }, { data: exp }, { data: pur }] = await Promise.all([readingsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ])
+      let calQ = supabase.from('pump_calibrations').select('*, pumps(pump_name, fuel_type)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      if (selectedBranchId) calQ = calQ.eq('branch_id', selectedBranchId)
 
-      setFuelReadings(readings || [])
+      const [{ data: snapshotsData }, { data: pumpsData }, { data: sales }, { data: ci }, { data: dep }, { data: chk }, { data: exp }, { data: pur }, { data: cal }] = await Promise.all([snapshotsQ, pumpsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ, calQ])
+
+      console.log('AccountabilityReport - snapshotsData:', snapshotsData)
+      console.log('AccountabilityReport - pumpsData:', pumpsData)
+
+      // Aggregate pump readings by fuel type AND category (regular/discounted)
+      // Use shift snapshots if available, fallback to pumps table
+      const aggregatedReadings = {}
+      const useSnapshots = snapshotsData && snapshotsData.length > 0
+
+      if (useSnapshots) {
+        // Use shift snapshots for per-shift data
+        snapshotsData.forEach(snapshot => {
+          const fuelType = snapshot.pumps?.fuel_type
+          const category = snapshot.pumps?.category || 'regular'
+          if (!fuelType) return
+
+          const key = `${fuelType}-${category}`
+
+          const beginningReading = parseFloat(snapshot.beginning_reading || 0)
+          const endingReading = parseFloat(snapshot.ending_reading || snapshot.beginning_reading || 0)
+          const litersDispensed = endingReading - beginningReading
+
+          if (!aggregatedReadings[key]) {
+            aggregatedReadings[key] = {
+              fuel_type: fuelType,
+              category: category,
+              beginning_reading: 0,
+              ending_reading: 0,
+              liters_dispensed: 0,
+              adjustment_liters: 0,
+              price_per_liter: snapshot.price_per_liter || snapshot.pumps?.price_per_liter || 0,
+            }
+          }
+
+          aggregatedReadings[key].beginning_reading += beginningReading
+          aggregatedReadings[key].ending_reading += endingReading
+          aggregatedReadings[key].liters_dispensed += litersDispensed
+        })
+      }
+      // No fallback - if no snapshots exist for this shift, show empty data
+      // This ensures each shift only shows its own data
+
+      // Convert to array - create entries for both regular and discounted variants
+      const readingsArray = []
+      fuelTypes.forEach(ft => {
+        // Regular variant
+        const regularKey = `${ft.name}-regular`
+        const regularAgg = aggregatedReadings[regularKey]
+        if (regularAgg) {
+          readingsArray.push({
+            fuel_type_id: ft.id,
+            fuel_type: ft.name,
+            category: 'regular',
+            short_code: ft.short_code, // e.g., "DSL"
+            beginning_reading: regularAgg.beginning_reading,
+            ending_reading: regularAgg.ending_reading,
+            liters_dispensed: regularAgg.liters_dispensed,
+            adjustment_liters: regularAgg.adjustment_liters,
+            price_per_liter: regularAgg.price_per_liter,
+          })
+        }
+
+        // Discounted variant
+        const discountedKey = `${ft.name}-discounted`
+        const discountedAgg = aggregatedReadings[discountedKey]
+        if (discountedAgg) {
+          readingsArray.push({
+            fuel_type_id: ft.id,
+            fuel_type: ft.name,
+            category: 'discounted',
+            short_code: `${ft.short_code}-D`, // e.g., "DSL-D"
+            beginning_reading: discountedAgg.beginning_reading,
+            ending_reading: discountedAgg.ending_reading,
+            liters_dispensed: discountedAgg.liters_dispensed,
+            adjustment_liters: discountedAgg.adjustment_liters,
+            price_per_liter: discountedAgg.price_per_liter,
+          })
+        }
+      })
+
+      setFuelReadings(readingsArray)
       setCashSales(sales || [])
       setChargeInvoices(ci || [])
+      setCalibrations(cal || [])
       setDeposits(dep || [])
       setChecks(chk || [])
       setExpenses(exp || [])
@@ -76,13 +183,13 @@ export default function AccountabilityReport() {
   }
 
   // Calculate totals
-  const getFuelReading = (fuelId) => fuelReadings.find(r => r.fuel_type_id === fuelId)
+  const getFuelReading = (fuelId, category = 'regular') => 
+    fuelReadings.find(r => r.fuel_type_id === fuelId && r.category === category)
   
-  // Calculate total fuel sales using current fuel prices
-  const totalFuelSales = fuelReadings.reduce((s, r) => {
-    const fuel = fuelTypes.find(f => f.id === r.fuel_type_id)
+  // Calculate total fuel sales using price_per_liter from pump readings
+  const baseFuelSales = fuelReadings.reduce((s, r) => {
     const liters = parseFloat(r.liters_dispensed || 0)
-    const price = parseFloat(fuel?.current_price || 0)
+    const price = parseFloat(r.price_per_liter || 0)
     return s + (liters * price)
   }, 0)
   const totalOilLubes = productSales.oil_lubes
@@ -96,10 +203,17 @@ export default function AccountabilityReport() {
   const totalChecks = checks.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalExpenses = expenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0)
   const totalPurchases = purchases.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
+  const totalCalibrations = calibrations.reduce((s, c) => s + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
+  const totalCalibrationLiters = calibrations.reduce((s, c) => s + parseFloat(c.liters || 0), 0)
 
+  // Total fuel includes calibration to show accurate pump reading
+  const totalFuelSales = baseFuelSales + totalCalibrations
+  
+  // Total accountability includes calibration, then we deduct it at the end
   const totalAccountability = totalFuelSales + totalOilLubes + totalAccessories + totalServices + totalMiscellaneous
+  const netAccountability = totalAccountability - totalCalibrations
   const totalRemittance = totalDeposits + totalChecks
-  const shortOver = totalRemittance - (totalAccountability - totalChargeInvoices - totalExpenses - totalPurchases)
+  const shortOver = totalRemittance - (totalAccountability - totalChargeInvoices - totalExpenses - totalPurchases - totalCalibrations)
 
   const handlePrint = () => {
     const printContent = printRef.current
@@ -219,72 +333,73 @@ export default function AccountabilityReport() {
           <thead>
             <tr className="bg-gray-100">
               <th className="border border-gray-300 p-2 text-left">FUEL SALES</th>
-              {fuelTypes.map(f => (
-                <th key={f.id} className="border border-gray-300 p-2 text-center">{f.short_code}</th>
+              {fuelReadings.map((r, idx) => (
+                <th key={idx} className="border border-gray-300 p-2 text-center">{r.short_code}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             <tr>
               <td className="border border-gray-300 p-2 font-medium">BEG. READING</td>
-              {fuelTypes.map(f => {
-                const r = getFuelReading(f.id)
-                return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
+              {fuelReadings.map((r, idx) => (
+                <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
                   {r?.beginning_reading ? parseFloat(r.beginning_reading).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
                 </td>
-              })}
+              ))}
             </tr>
             <tr>
               <td className="border border-gray-300 p-2 font-medium">END READING</td>
-              {fuelTypes.map(f => {
-                const r = getFuelReading(f.id)
-                return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
+              {fuelReadings.map((r, idx) => (
+                <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
                   {r?.ending_reading ? parseFloat(r.ending_reading).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
                 </td>
-              })}
+              ))}
             </tr>
             <tr>
               <td className="border border-gray-300 p-2 font-medium">GROSS</td>
-              {fuelTypes.map(f => {
-                const r = getFuelReading(f.id)
-                return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
+              {fuelReadings.map((r, idx) => (
+                <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
                   {r?.liters_dispensed ? parseFloat(r.liters_dispensed).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
                 </td>
-              })}
+              ))}
             </tr>
             <tr>
               <td className="border border-gray-300 p-2 font-medium">Less: Adjustment</td>
-              {fuelTypes.map(f => {
-                const r = getFuelReading(f.id)
-                return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
+              {fuelReadings.map((r, idx) => (
+                <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
                   {r?.adjustment_liters ? parseFloat(r.adjustment_liters).toFixed(2) : '—'}
                 </td>
-              })}
+              ))}
             </tr>
             <tr>
               <td className="border border-gray-300 p-2 font-medium">NET READING</td>
-              {fuelTypes.map(f => {
-                const r = getFuelReading(f.id)
+              {fuelReadings.map((r, idx) => {
                 const net = r ? (parseFloat(r.liters_dispensed || 0) - parseFloat(r.adjustment_liters || 0)) : null
-                return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
+                return <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
                   {net !== null ? net.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
                 </td>
               })}
             </tr>
             <tr>
               <td className="border border-gray-300 p-2 font-medium">PRICE / LITER</td>
-              {fuelTypes.map(f => {
-                return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
-                  {parseFloat(f.current_price).toFixed(2)}
+              {fuelReadings.map((r, idx) => (
+                <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
+                  {r?.price_per_liter ? parseFloat(r.price_per_liter).toFixed(2) : '—'}
                 </td>
-              })}
+              ))}
             </tr>
             <tr className="bg-gray-50 font-bold">
               <td className="border border-gray-300 p-2">TOTAL FUEL</td>
-              {fuelTypes.map(f => {
-                const r = getFuelReading(f.id)
-                const totalValue = r ? (parseFloat(r.liters_dispensed || 0) * parseFloat(f.current_price)) : 0
-                return <td key={f.id} className="border border-gray-300 p-2 text-right font-mono">
+              {fuelReadings.map((r, idx) => {
+                const baseValue = r ? (parseFloat(r.liters_dispensed || 0) * parseFloat(r.price_per_liter || 0)) : 0
+                // Add calibration amount for this fuel type
+                const fuelCalibrations = calibrations.filter(c => 
+                  c.pumps?.fuel_type === r?.fuel_type && 
+                  (c.pumps?.category || 'regular') === (r?.category || 'regular')
+                )
+                const calibrationValue = fuelCalibrations.reduce((s, c) => s + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
+                const totalValue = baseValue + calibrationValue
+                return <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
                   {totalValue > 0 ? totalValue.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
                 </td>
               })}
@@ -322,11 +437,21 @@ export default function AccountabilityReport() {
           </div>
         </div>
 
+        {/* Calibration (if exists) - deducted from total */}
+        {totalCalibrations > 0 && (
+          <div className="flex justify-end mb-2">
+            <div className="border-2 border-pink-300 px-6 py-2 bg-pink-50">
+              <span className="font-bold text-sm text-pink-700">LESS: CALIBRATION ({totalCalibrationLiters.toFixed(2)}L): </span>
+              <span className="font-mono font-bold text-lg text-pink-700">₱{totalCalibrations.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+            </div>
+          </div>
+        )}
+
         {/* Total Accountability */}
         <div className="flex justify-end mb-6">
           <div className="border-2 border-gray-800 px-6 py-3 bg-gray-50">
             <span className="font-bold text-sm">TOTAL ACCOUNTABILITY: </span>
-            <span className="font-mono font-bold text-lg">₱{totalAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+            <span className="font-mono font-bold text-lg">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
           </div>
         </div>
 
@@ -418,6 +543,9 @@ export default function AccountabilityReport() {
                 <tr><td className="border border-gray-300 p-2 font-medium">D. CHARGE INVOICES</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">{totalChargeInvoices.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr><td className="border border-gray-300 p-2 font-medium">E. EXPENSES</td><td className="border border-gray-300 p-2 text-right font-mono">{totalExpenses.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr><td className="border border-gray-300 p-2 font-medium">F. PURCHASE / DISBURSEMENTS</td><td className="border border-gray-300 p-2 text-right font-mono">{totalPurchases.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                {totalCalibrations > 0 && (
+                  <tr className="bg-pink-50"><td className="border border-gray-300 p-2 font-medium text-pink-700">G. CALIBRATION ({totalCalibrationLiters.toFixed(2)}L)</td><td className="border border-gray-300 p-2 text-right font-mono text-pink-700">{totalCalibrations.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -426,7 +554,7 @@ export default function AccountabilityReport() {
               <tbody>
                 <tr><td className="border border-gray-300 p-2 font-medium">Total Remittance:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">{totalRemittance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr><td className="border border-gray-300 p-2 font-medium">Short/Over:</td><td className="border border-gray-300 p-2 text-right font-mono">{shortOver.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
-                <tr><td className="border border-gray-300 p-2 font-medium">Total Sales:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">{totalAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr><td className="border border-gray-300 p-2 font-medium">Total Sales:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
               </tbody>
             </table>
           </div>

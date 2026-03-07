@@ -86,70 +86,122 @@ export default function PurchaseOrders() {
   // Get unique customers from filtered orders
   const uniqueCustomers = [...new Set(filtered.map(o => o.customer_name))].sort()
 
-  const handlePrintCustomer = (customerName) => {
+  const printCustomerStatement = (customerName) => {
     const customerOrders = filtered.filter(o => o.customer_name === customerName)
-    const totalAmount = customerOrders.reduce((s, o) => s + parseFloat(o.amount || 0), 0)
-    const unpaidAmount = customerOrders.filter(o => o.status === 'unpaid').reduce((s, o) => s + parseFloat(o.amount || 0), 0)
+    
+    // Calculate totals and discounts
+    const ordersWithCalc = customerOrders.map(o => {
+      const liters = parseFloat(o.liters || 0)
+      const pricePerLiter = parseFloat(o.price_per_liter || 0)
+      const amount = parseFloat(o.amount || 0)
+      
+      // Check if this is a discounted fuel type (based on fuel_types table)
+      const isDiscounted = o.fuel_types?.is_discounted || false
+      
+      // Calculate regular price (assuming 2 peso discount for discounted fuel)
+      const regularPrice = isDiscounted ? pricePerLiter + 2 : pricePerLiter
+      const totalBeforeDiscount = liters * regularPrice
+      const discount = isDiscounted ? liters * 2 : 0
+      const totalDiscounted = amount
+      
+      return {
+        ...o,
+        liters,
+        pricePerLiter,
+        regularPrice,
+        totalBeforeDiscount,
+        discount,
+        totalDiscounted
+      }
+    })
+    
+    const totalAmount = ordersWithCalc.reduce((s, o) => s + o.totalBeforeDiscount, 0)
+    const totalDiscount = ordersWithCalc.reduce((s, o) => s + o.discount, 0)
+    const totalDiscounted = ordersWithCalc.reduce((s, o) => s + o.totalDiscounted, 0)
+    const unpaidAmount = ordersWithCalc.filter(o => o.status === 'unpaid').reduce((s, o) => s + o.totalDiscounted, 0)
     
     const printWindow = window.open('', '_blank')
     printWindow.document.write(`
       <html>
         <head>
-          <title>Purchase Orders - ${customerName}</title>
+          <title>Statement of Account - ${customerName}</title>
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; font-size: 11px; padding: 20px; }
+            body { font-family: Arial, sans-serif; font-size: 10px; padding: 20px; }
             .header { text-align: center; margin-bottom: 20px; }
             .header h1 { font-size: 16px; font-weight: bold; }
-            .customer-info { margin-bottom: 15px; padding: 10px; background: #f5f5f5; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-            th, td { border: 1px solid #000; padding: 6px 8px; text-align: left; }
-            th { background: #f0f0f0; font-weight: bold; }
+            .customer-info { margin-bottom: 15px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 9px; }
+            th, td { border: 1px solid #000; padding: 4px 6px; text-align: left; }
+            th { background: #f0f0f0; font-weight: bold; font-size: 8px; }
             .text-right { text-align: right; }
+            .text-center { text-align: center; }
             .font-bold { font-weight: bold; }
-            .summary { margin-top: 15px; text-align: right; }
-            .summary p { margin: 5px 0; }
+            .summary { margin-top: 10px; }
+            .summary-row { display: flex; justify-content: space-between; margin: 3px 0; }
             @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
           </style>
         </head>
         <body>
+          <p style="font-size: 12px; font-weight: bold; margin-bottom: 5px;">${customerName}</p>
+          <p style="font-size: 9px; margin-bottom: 3px;"><strong>PERIOD COVERED:</strong> ${format(new Date(startDate), 'MMM. d, yyyy')} - ${format(new Date(endDate), 'MMM. d, yyyy')}</p>
+          <p style="font-size: 9px; margin-bottom: 15px;"><strong>SOA #:</strong> ${format(new Date(), 'yyyy')}-${customerOrders[0]?.po_number || 'N/A'}</p>
+          
           <div class="header">
-            <h1>MACKY OIL&GAS</h1>
-            <p>Lower Sosohon, Manolo Fortich, Bukidnon</p>
-            <h2 style="margin-top: 10px;">PURCHASE ORDER STATEMENT</h2>
-          </div>
-          <div class="customer-info">
-            <p><strong>Customer:</strong> ${customerName}</p>
-            <p><strong>Date Range:</strong> ${format(new Date(startDate), 'MMM d, yyyy')} - ${format(new Date(endDate), 'MMM d, yyyy')}</p>
-            <p><strong>Generated:</strong> ${format(new Date(), 'MMM d, yyyy h:mm a')}</p>
+            <h2 style="margin-bottom: 10px;">STATEMENT OF ACCOUNT</h2>
           </div>
           <table>
             <thead>
               <tr>
-                <th>Date</th>
-                <th>PO #</th>
-                <th>Fuel</th>
-                <th>Plate #</th>
-                <th class="text-right">Amount</th>
-                <th>Status</th>
+                <th class="text-center" rowspan="2">DATE</th>
+                <th class="text-center" rowspan="2">CHARGE<br/>INVOICE</th>
+                <th class="text-center" rowspan="2">PLATE #</th>
+                <th class="text-center" rowspan="2">ITEMS<br/>WITHDRAWAL</th>
+                <th class="text-center" colspan="2">ARTILES</th>
+                <th class="text-center">UNIT<br/>PRICE</th>
+                <th class="text-center" rowspan="2">TOTAL</th>
+                <th class="text-center" rowspan="2">DISCOUNT</th>
+                <th class="text-center" rowspan="2">TOTAL<br/>DISCOUNTED</th>
+              </tr>
+              <tr>
+                <th class="text-center" style="font-size: 7px;">UNIT</th>
+                <th class="text-center" colspan="2" style="font-size: 7px;">NO.OF LITERS</th>
               </tr>
             </thead>
             <tbody>
-              ${customerOrders.map(o => `
+              ${ordersWithCalc.map(o => `
                 <tr>
-                  <td>${format(new Date(o.created_at), 'MM/dd/yy')}</td>
-                  <td>${o.po_number || '—'}</td>
-                  <td>${o.fuel_types?.short_code || '—'}</td>
-                  <td>${o.plate_number || '—'}</td>
-                  <td class="text-right">₱${parseFloat(o.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                  <td>${o.status}</td>
+                  <td class="text-center">${format(new Date(o.created_at), 'd-MMM')}</td>
+                  <td class="text-center">${o.po_number || '—'}</td>
+                  <td class="text-center">${o.plate_number || '—'}</td>
+                  <td class="text-center">${o.fuel_types?.short_code || 'DIESEL'}</td>
+                  <td class="text-center">LITER</td>
+                  <td class="text-center">${o.liters.toFixed(2)}</td>
+                  <td class="text-right">${o.regularPrice.toFixed(2)}</td>
+                  <td class="text-right">${o.totalBeforeDiscount.toFixed(2)}</td>
+                  <td class="text-right">${o.discount.toFixed(2)}</td>
+                  <td class="text-right">${o.totalDiscounted.toFixed(2)}</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
           <div class="summary">
-            <p><strong>Total Amount:</strong> ₱${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
-            <p style="color: red;"><strong>Unpaid Balance:</strong> ₱${unpaidAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+            <div class="summary-row">
+              <span><strong>TOTAL</strong></span>
+              <span><strong>${totalAmount.toFixed(2)}</strong></span>
+            </div>
+            <div class="summary-row">
+              <span><strong>DISCOUNT</strong></span>
+              <span><strong>${totalDiscount.toFixed(2)}</strong></span>
+            </div>
+            <div class="summary-row" style="border-top: 2px solid #000; padding-top: 5px; margin-top: 5px;">
+              <span><strong>TOTAL DISCOUNTED</strong></span>
+              <span><strong>${totalDiscounted.toFixed(2)}</strong></span>
+            </div>
+          </div>
+          <div style="margin-top: 30px; font-size: 9px;">
+            <p style="margin-bottom: 10px;">Received Date / Name: _________________________________________</p>
+            <p>Prepared By: _________________________________________</p>
           </div>
         </body>
       </html>
@@ -239,7 +291,7 @@ export default function PurchaseOrders() {
             {uniqueCustomers.map(name => (
               <button
                 key={name}
-                onClick={() => handlePrintCustomer(name)}
+                onClick={() => printCustomerStatement(name)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-blue-100 text-gray-700 hover:text-blue-700 rounded-lg text-xs font-medium transition-colors"
               >
                 <Printer size={12} /> {name}
@@ -294,23 +346,22 @@ export default function PurchaseOrders() {
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      {o.status === 'unpaid' && (
-                        <div className="flex gap-1">
-                          <button onClick={() => handleMarkPaid(o.id, o.amount)}
-                            className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Mark Paid">
-                            <Check size={14} />
-                          </button>
-                          <button onClick={() => handleCancel(o.id)}
-                            className="p-1.5 text-red-400 hover:bg-red-50 rounded" title="Cancel">
-                            <X size={14} />
-                          </button>
-                        </div>
-                      )}
-                      {o.status === 'paid' && o.paid_at && (
-                        <span className="text-[10px] text-gray-400">
-                          Paid {format(new Date(o.paid_at), 'MMM d')}
-                        </span>
-                      )}
+                      <select 
+                        value={o.status} 
+                        onChange={(e) => {
+                          const newStatus = e.target.value
+                          if (newStatus === 'paid') {
+                            handleMarkPaid(o.id, o.amount)
+                          } else if (newStatus === 'cancelled') {
+                            handleCancel(o.id)
+                          }
+                        }}
+                        className="text-xs px-2 py-1 border border-gray-200 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                      >
+                        <option value="unpaid">Unpaid</option>
+                        <option value="paid">Paid</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
                     </td>
                   </tr>
                 ))

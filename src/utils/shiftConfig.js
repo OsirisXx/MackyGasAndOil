@@ -51,3 +51,49 @@ export function getShiftsForBranch(branchName) {
 export function formatShiftTime(shift) {
   return `${shift.startTime} - ${shift.endTime}`
 }
+
+/**
+ * Get current shift number based on current time
+ * @param {string} branchName - Name of the branch
+ * @returns {number} Current shift number (1, 2, or 3)
+ */
+export function getCurrentShift(branchName) {
+  const shifts = getShiftsForBranch(branchName)
+  const now = new Date()
+  const currentHour = now.getHours()
+  const currentMinute = now.getMinutes()
+  const currentTimeInMinutes = currentHour * 60 + currentMinute
+
+  // Parse time string (e.g., "4:00 AM") to minutes since midnight
+  const parseTime = (timeStr) => {
+    const [time, period] = timeStr.split(' ')
+    let [hours, minutes] = time.split(':').map(Number)
+    
+    if (period === 'PM' && hours !== 12) hours += 12
+    if (period === 'AM' && hours === 12) hours = 0
+    
+    return hours * 60 + minutes
+  }
+
+  // Check each shift
+  for (const shift of shifts) {
+    const startMinutes = parseTime(shift.startTime)
+    const endMinutes = parseTime(shift.endTime)
+
+    // Handle shifts that cross midnight (e.g., 8:00 PM - 4:00 AM)
+    if (endMinutes < startMinutes) {
+      // Shift crosses midnight
+      if (currentTimeInMinutes >= startMinutes || currentTimeInMinutes < endMinutes) {
+        return shift.number
+      }
+    } else {
+      // Normal shift within same day
+      if (currentTimeInMinutes >= startMinutes && currentTimeInMinutes < endMinutes) {
+        return shift.number
+      }
+    }
+  }
+
+  // Fallback to shift 1 if no match (shouldn't happen)
+  return 1
+}

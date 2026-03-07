@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../stores/authStore'
 import { useFuelStore } from '../stores/fuelStore'
+import { usePumpStore } from '../stores/pumpStore'
 import { useBranchStore } from '../stores/branchStore'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 import {
   Fuel, DollarSign, TrendingUp, Clock, Users,
-  FileText, ArrowUpRight, ArrowDownRight, Calendar, RefreshCw, Package
+  FileText, ArrowUpRight, ArrowDownRight, Calendar, RefreshCw, Package, Droplet
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -43,6 +44,7 @@ function StatCard({ icon: Icon, label, value, sub, color = 'blue', trend }) {
 export default function Dashboard() {
   const { adminProfile: profile } = useAuthStore()
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
+  const { pumps, fetchPumps } = usePumpStore()
   const { selectedBranchId, getSelectedBranch } = useBranchStore()
   const [today] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [loading, setLoading] = useState(true)
@@ -81,8 +83,8 @@ export default function Dashboard() {
       let productQ = supabase.from('product_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
       if (selectedBranchId) productQ = productQ.eq('branch_id', selectedBranchId)
 
-      // Recent sales
-      let recentCashQ = supabase.from('cash_sales').select('*, fuel_types(short_code), cashiers(full_name)').order('created_at', { ascending: false }).limit(5)
+      // Recent sales - now with pump data
+      let recentCashQ = supabase.from('cash_sales').select('*, pumps(pump_name, fuel_type, category), cashiers(full_name)').order('created_at', { ascending: false }).limit(5)
       if (selectedBranchId) recentCashQ = recentCashQ.eq('branch_id', selectedBranchId)
 
       let recentProdQ = supabase.from('product_sales').select('*').order('created_at', { ascending: false }).limit(5)
@@ -126,6 +128,9 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
+    if (selectedBranchId) {
+      fetchPumps(selectedBranchId)
+    }
     fetchDashboardData()
   }, [selectedBranchId])
 
@@ -214,7 +219,12 @@ export default function Dashboard() {
                       </span>
                     ) : (
                       <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium mr-2">
-                        {s.fuel_types?.short_code || 'FUEL'}
+                        {s.pumps?.pump_name || 'FUEL'}
+                      </span>
+                    )}
+                    {s.pumps?.category === 'discounted' && (
+                      <span className="text-xs bg-amber-50 text-amber-600 px-1 py-0.5 rounded font-medium mr-1">
+                        DISC
                       </span>
                     )}
                     <span className="text-xs text-gray-400">
@@ -231,26 +241,46 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Fuel Prices */}
+      {/* Active Pumps */}
       <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
         <div className="flex items-center gap-2 mb-4">
-          <Fuel size={18} className="text-blue-600" />
-          <h2 className="font-semibold text-gray-800">Current Fuel Prices</h2>
+          <Droplet size={18} className="text-blue-600" />
+          <h2 className="font-semibold text-gray-800">Active Pumps</h2>
+          {selectedBranchId && (
+            <span className="text-xs text-gray-400">({pumps.length} configured)</span>
+          )}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {fuelTypes.map(fuel => (
-            <div key={fuel.id} className="bg-gray-50 rounded-lg p-3 text-center">
-              <p className="text-xs text-gray-500 font-medium mb-1">{fuel.short_code}</p>
-              <p className="text-lg font-bold text-gray-800">₱{parseFloat(fuel.current_price).toFixed(2)}</p>
-              <p className="text-[10px] text-gray-400">{fuel.name}</p>
-              {fuel.is_discounted && (
-                <span className="inline-block mt-1 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium">
-                  Discounted
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
+        {!selectedBranchId ? (
+          <p className="text-sm text-gray-400">Select a branch to view configured pumps</p>
+        ) : pumps.length === 0 ? (
+          <p className="text-sm text-gray-400">No pumps configured yet. Go to Pump Management to add pumps.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+            {pumps.map(pump => (
+              <div key={pump.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-bold text-gray-700">Pump {pump.pump_number}</p>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                    pump.category === 'discounted' 
+                      ? 'bg-amber-100 text-amber-700' 
+                      : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {pump.category === 'discounted' ? 'DISC' : 'REG'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-gray-500 mb-1 truncate" title={pump.pump_name}>
+                  {pump.fuel_type}
+                </p>
+                <p className="text-sm font-bold text-gray-800">₱{parseFloat(pump.price_per_liter).toFixed(2)}/L</p>
+                {!pump.is_active && (
+                  <span className="inline-block mt-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-medium">
+                    Inactive
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Quick Actions */}

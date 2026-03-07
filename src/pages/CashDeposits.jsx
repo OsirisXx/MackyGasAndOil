@@ -9,6 +9,7 @@ import { logAudit } from '../stores/auditStore'
 export default function CashDeposits() {
   const { branches, selectedBranchId } = useBranchStore()
   const [deposits, setDeposits] = useState([])
+  const [withdrawals, setWithdrawals] = useState([])
   const [cashiers, setCashiers] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -16,10 +17,12 @@ export default function CashDeposits() {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState('deposits')
 
   useEffect(() => {
     fetchCashiers()
     fetchDeposits()
+    fetchWithdrawals()
   }, [selectedBranchId, selectedDate, selectedCashier])
 
   const fetchCashiers = async () => {
@@ -62,6 +65,39 @@ export default function CashDeposits() {
       toast.error(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchWithdrawals = async () => {
+    try {
+      let query = supabase
+        .from('cash_withdrawals')
+        .select(`
+          *,
+          cashiers(full_name),
+          branches(name)
+        `)
+        .order('withdrawal_date', { ascending: false })
+
+      if (selectedBranchId) {
+        query = query.eq('branch_id', selectedBranchId)
+      }
+
+      if (selectedDate) {
+        query = query
+          .gte('withdrawal_date', selectedDate + 'T00:00:00')
+          .lte('withdrawal_date', selectedDate + 'T23:59:59')
+      }
+
+      if (selectedCashier) {
+        query = query.eq('cashier_id', selectedCashier)
+      }
+
+      const { data, error } = await query
+      if (error) throw error
+      setWithdrawals(data || [])
+    } catch (err) {
+      toast.error(err.message)
     }
   }
 
@@ -134,15 +170,17 @@ export default function CashDeposits() {
   }
 
   const totalDeposits = deposits.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0)
+  const totalWithdrawals = withdrawals.reduce((sum, w) => sum + parseFloat(w.amount || 0), 0)
+  const netVaultBalance = totalDeposits - totalWithdrawals
 
   return (
     <div className="p-6">
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
           <Vault size={28} className="text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-800">Cash Deposits & Remittance</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Vault Management</h1>
         </div>
-        <p className="text-sm text-gray-500">Track cash deposits to vault and calculate remittance</p>
+        <p className="text-sm text-gray-500">Track cash deposits and withdrawals from the vault</p>
       </div>
 
       {/* Filters */}
@@ -197,85 +235,124 @@ export default function CashDeposits() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {/* Total Deposits */}
         <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-5 text-white">
           <div className="flex items-center justify-between mb-3">
             <div className="p-2 bg-white/20 rounded-lg">
               <Vault size={20} />
             </div>
-            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">{deposits.length} deposits</span>
+            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">{deposits.length}</span>
           </div>
-          <p className="text-blue-100 text-xs mb-1">Total Cash Deposits</p>
+          <p className="text-blue-100 text-xs mb-1">Total Deposits</p>
           <p className="text-2xl font-bold">₱{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
-          <p className="text-blue-100 text-[10px] mt-1">Input by cashier</p>
+          <p className="text-blue-100 text-[10px] mt-1">Cash added to vault</p>
         </div>
 
-        {/* Deposit List Preview */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Receipt size={18} className="text-gray-400" />
-            <h3 className="text-sm font-semibold text-gray-700">Deposit Breakdown</h3>
-          </div>
-          <div className="space-y-1 max-h-20 overflow-y-auto">
-            {deposits.length > 0 ? (
-              deposits.slice(0, 4).map((d, i) => (
-                <div key={d.id} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-500">Deposit {i + 1}</span>
-                  <span className="font-semibold text-gray-800">₱{parseFloat(d.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-xs text-gray-400 italic">No deposits yet</p>
-            )}
-            {deposits.length > 4 && (
-              <p className="text-[10px] text-gray-400 mt-1">+{deposits.length - 4} more...</p>
-            )}
-          </div>
-        </div>
-
-        {/* Remittance Info */}
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-5 text-white">
+        {/* Total Withdrawals */}
+        <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg p-5 text-white">
           <div className="flex items-center justify-between mb-3">
             <div className="p-2 bg-white/20 rounded-lg">
               <DollarSign size={20} />
             </div>
+            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">{withdrawals.length}</span>
           </div>
-          <p className="text-green-100 text-xs mb-1">Total Remittance</p>
-          <p className="text-2xl font-bold">₱{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
-          <p className="text-green-100 text-[10px] mt-1">Deposits - Cash on Hand</p>
+          <p className="text-orange-100 text-xs mb-1">Total Withdrawals</p>
+          <p className="text-2xl font-bold">₱{totalWithdrawals.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+          <p className="text-orange-100 text-[10px] mt-1">Cash taken from vault</p>
+        </div>
+
+        {/* Net Vault Balance */}
+        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-5 text-white">
+          <div className="flex items-center justify-between mb-3">
+            <div className="p-2 bg-white/20 rounded-lg">
+              <Receipt size={20} />
+            </div>
+          </div>
+          <p className="text-green-100 text-xs mb-1">Net Vault Balance</p>
+          <p className="text-2xl font-bold">₱{netVaultBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+          <p className="text-green-100 text-[10px] mt-1">Deposits - Withdrawals</p>
+        </div>
+
+        {/* Transaction Count */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Receipt size={18} className="text-gray-400" />
+            <h3 className="text-sm font-semibold text-gray-700">Transactions</h3>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">Deposits</span>
+              <span className="font-semibold text-blue-600">{deposits.length}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">Withdrawals</span>
+              <span className="font-semibold text-orange-600">{withdrawals.length}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs pt-2 border-t">
+              <span className="text-gray-700 font-medium">Total</span>
+              <span className="font-bold text-gray-800">{deposits.length + withdrawals.length}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm mb-6">
+        <div className="flex border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('deposits')}
+            className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
+              activeTab === 'deposits'
+                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            Deposits ({deposits.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('withdrawals')}
+            className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
+              activeTab === 'withdrawals'
+                ? 'text-orange-600 border-b-2 border-orange-600 bg-orange-50'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            Withdrawals ({withdrawals.length})
+          </button>
         </div>
       </div>
 
       {/* Deposits Table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date & Time</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Cashier</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Branch</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Notes</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading ? (
+      {activeTab === 'deposits' && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
-                    Loading deposits...
-                  </td>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date & Time</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Cashier</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Branch</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Notes</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Actions</th>
                 </tr>
-              ) : deposits.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
-                    No deposits found for the selected filters
-                  </td>
-                </tr>
-              ) : (
-                deposits.map(deposit => (
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
+                      Loading deposits...
+                    </td>
+                  </tr>
+                ) : deposits.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
+                      No deposits found for the selected filters
+                    </td>
+                  </tr>
+                ) : (
+                  deposits.map(deposit => (
                   <tr key={deposit.id} className="hover:bg-gray-50">
                     {editingId === deposit.id ? (
                       <>
@@ -368,10 +445,71 @@ export default function CashDeposits() {
                   </tr>
                 ))
               )}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Withdrawals Table */}
+      {activeTab === 'withdrawals' && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date & Time</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Cashier</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Branch</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Reason</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
+                      Loading withdrawals...
+                    </td>
+                  </tr>
+                ) : withdrawals.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
+                      No withdrawals found for the selected filters
+                    </td>
+                  </tr>
+                ) : (
+                  withdrawals.map(withdrawal => (
+                    <tr key={withdrawal.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-800">
+                        {format(new Date(withdrawal.withdrawal_date), 'MMM d, yyyy h:mm a')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-800 font-medium">
+                        {withdrawal.cashiers?.full_name || 'Unknown'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {withdrawal.branches?.name || 'N/A'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-orange-600">
+                        ₱{parseFloat(withdrawal.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-800">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                          {withdrawal.reason}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {withdrawal.notes || <span className="text-gray-400 italic">No notes</span>}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

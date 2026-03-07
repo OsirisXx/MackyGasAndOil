@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Fuel, FileText, Users, Package,
   ChevronLeft, ChevronRight, LogOut, Menu, X,
   Receipt, DollarSign, Settings, TrendingUp,
-  QrCode, Clock, ShoppingCart, Building2, ClipboardList, Gauge, Vault
+  QrCode, Clock, ShoppingCart, Building2, ClipboardList, Gauge, Vault, Truck, BarChart3, Droplet
 } from 'lucide-react'
 
 const adminNav = [
@@ -15,8 +15,10 @@ const adminNav = [
   { path: '/admin/attendance', label: 'Attendance', icon: Clock },
   { path: '/admin/daily-report', label: 'Daily Report', icon: FileText },
   { path: '/admin/accountability-report', label: 'Accountability Report', icon: FileText },
-  { path: '/admin/fuel-management', label: 'Fuel Management', icon: Fuel },
-  { path: '/admin/shift-readings', label: 'Shift Readings', icon: Gauge },
+  { path: '/admin/pump-management', label: 'Pump Management', icon: Droplet },
+  // Shift Readings removed - now handled by PumpReadingsPanel in POS
+  { path: '/admin/fuel-deliveries', label: 'Fuel Deliveries', icon: Truck },
+  { path: '/admin/fuel-reconciliation', label: 'Fuel Reconciliation', icon: BarChart3 },
   { path: '/admin/cash-deposits', label: 'Cash Deposits', icon: Vault },
   { path: '/admin/customers', label: 'Customers', icon: Users },
   { path: '/admin/products', label: 'Products & Inventory', icon: Package },

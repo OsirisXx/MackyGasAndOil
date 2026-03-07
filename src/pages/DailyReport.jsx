@@ -4,7 +4,7 @@ import { useBranchStore } from '../stores/branchStore'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 import {
-  FileText, Fuel, RefreshCw, DollarSign, Receipt, ChevronDown, ChevronUp, Edit2, X, Save, Package, Printer, Users
+  FileText, Fuel, RefreshCw, DollarSign, Receipt, ChevronDown, ChevronUp, Edit2, X, Save, Package, Printer, Users, Gauge
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
@@ -47,9 +47,11 @@ export default function DailyReport() {
   const [cashSales, setCashSales] = useState([])
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [productSales, setProductSales] = useState([])
+  const [calibrations, setCalibrations] = useState([])
   const [editingSale, setEditingSale] = useState(null)
   const [editingPO, setEditingPO] = useState(null)
-  const [editForm, setEditForm] = useState({ amount: '' })
+  const [editingCalibration, setEditingCalibration] = useState(null)
+  const [editForm, setEditForm] = useState({ amount: '', liters: '' })
   const printRef = useRef(null)
 
   const fetchCashiers = async () => {
@@ -77,11 +79,16 @@ export default function DailyReport() {
       if (selectedBranchId) prodQ = prodQ.eq('branch_id', selectedBranchId)
       if (selectedCashierId !== 'all') prodQ = prodQ.eq('cashier_id', selectedCashierId)
 
-      const [{ data: sales }, { data: pos }, { data: prods }] = await Promise.all([salesQ, poQ, prodQ])
+      let calQ = supabase.from('pump_calibrations').select('*, pumps(pump_name, fuel_type), cashiers(full_name)').eq('shift_date', reportDate).order('created_at', { ascending: true })
+      if (selectedBranchId) calQ = calQ.eq('branch_id', selectedBranchId)
+      if (selectedCashierId !== 'all') calQ = calQ.eq('cashier_id', selectedCashierId)
+
+      const [{ data: sales }, { data: pos }, { data: prods }, { data: cals }] = await Promise.all([salesQ, poQ, prodQ, calQ])
 
       setCashSales(sales || [])
       setPurchaseOrders(pos || [])
       setProductSales(prods || [])
+      setCalibrations(cals || [])
     } catch (err) {
       console.error('DailyReport fetch error:', err)
     } finally {
@@ -105,6 +112,8 @@ export default function DailyReport() {
   const totalCashSales = cashSales.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
   const totalPurchaseOrders = purchaseOrders.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
   const totalProductSales = productSales.reduce((s, r) => s + parseFloat(r.total_amount || 0), 0)
+  const totalCalibrations = calibrations.reduce((s, c) => s + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
+  const totalCalibrationLiters = calibrations.reduce((s, c) => s + parseFloat(c.liters || 0), 0)
   const totalAll = totalCashSales + totalPurchaseOrders + totalProductSales
 
   const startEditSale = (sale) => {
@@ -114,13 +123,19 @@ export default function DailyReport() {
 
   const startEditPO = (po) => {
     setEditingPO(po.id)
-    setEditForm({ amount: po.amount })
+    setEditForm({ amount: po.amount, liters: '' })
+  }
+
+  const startEditCalibration = (cal) => {
+    setEditingCalibration(cal.id)
+    setEditForm({ amount: cal.amount || '', liters: cal.liters || '' })
   }
 
   const cancelEdit = () => {
     setEditingSale(null)
     setEditingPO(null)
-    setEditForm({ amount: '' })
+    setEditingCalibration(null)
+    setEditForm({ amount: '', liters: '' })
   }
 
   const handleSaveSale = async (sale) => {
@@ -162,6 +177,31 @@ export default function DailyReport() {
       oldValues: { amount: oldAmount },
       newValues: { amount: newAmount },
       branchId: po.branch_id,
+    })
+    cancelEdit()
+    fetchData()
+  }
+
+  const handleSaveCalibration = async (cal) => {
+    const oldLiters = parseFloat(cal.liters)
+    const oldAmount = parseFloat(cal.amount || (cal.liters * cal.price_per_liter) || 0)
+    const newLiters = parseFloat(editForm.liters)
+    if (isNaN(newLiters) || newLiters <= 0) return toast.error('Invalid liters')
+    
+    const newAmount = newLiters * parseFloat(cal.price_per_liter || 0)
+    
+    const { error } = await supabase
+      .from('pump_calibrations')
+      .update({ liters: newLiters, amount: newAmount })
+      .eq('id', cal.id)
+    
+    if (error) return toast.error(error.message)
+    toast.success('Calibration updated')
+    logAudit('update', 'pump_calibration', `Edited calibration: ${oldLiters.toFixed(2)}L → ${newLiters.toFixed(2)}L`, {
+      entityId: cal.id,
+      oldValues: { liters: oldLiters, amount: oldAmount },
+      newValues: { liters: newLiters, amount: newAmount },
+      branchId: cal.branch_id,
     })
     cancelEdit()
     fetchData()
@@ -443,6 +483,57 @@ export default function DailyReport() {
           </div>
         )}
       </Section>
+
+      {/* Calibrations */}
+      {calibrations.length > 0 && (
+        <Section title="Calibrations" icon={Gauge} count={calibrations.length} total={totalCalibrations} defaultOpen={false}>
+          <div className="divide-y divide-gray-50">
+            {calibrations.map(c => {
+              const calAmount = parseFloat(c.amount || (c.liters * c.price_per_liter) || 0)
+              return (
+                <div key={c.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs bg-pink-50 text-pink-600 px-2 py-0.5 rounded font-medium">
+                      {c.pumps?.fuel_type || 'FUEL'}
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{c.pumps?.pump_name || 'Unknown Pump'}</p>
+                      <p className="text-[10px] text-gray-400">
+                        {c.cashiers?.full_name || 'Unknown'} • Shift {c.shift_number} • {parseFloat(c.liters).toFixed(2)}L @ ₱{parseFloat(c.price_per_liter).toFixed(2)}/L
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {editingCalibration === c.id ? (
+                      <>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editForm.liters}
+                          onChange={e => setEditForm({ ...editForm, liters: e.target.value })}
+                          className="w-20 px-2 py-1 border border-gray-200 rounded text-sm text-right"
+                          placeholder="Liters"
+                          autoFocus
+                        />
+                        <span className="text-xs text-gray-400">L</span>
+                        <button onClick={() => handleSaveCalibration(c)} className="p-1 text-green-600 hover:bg-green-50 rounded"><Save size={14} /></button>
+                        <button onClick={cancelEdit} className="p-1 text-gray-400 hover:bg-gray-100 rounded"><X size={14} /></button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-bold text-pink-700">₱{calAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        <button onClick={() => startEditCalibration(c)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                          <Edit2 size={14} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Section>
+      )}
         </>
       )}
 
@@ -578,6 +669,47 @@ export default function DailyReport() {
             </>
           )}
 
+          {/* Calibrations */}
+          {calibrations.length > 0 && (
+            <>
+              <div className="section-title" style={{fontWeight: 'bold', margin: '20px 0 10px', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #000', paddingBottom: '4px', color: '#be185d'}}>CALIBRATIONS</div>
+              <table style={{width: '100%', borderCollapse: 'collapse', marginBottom: '20px'}}>
+                <thead>
+                  <tr>
+                    <th style={{width: '60px', border: '1px solid #333', padding: '6px 8px', background: '#fce7f3', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Shift</th>
+                    <th style={{border: '1px solid #333', padding: '6px 8px', background: '#fce7f3', fontWeight: 'bold', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase'}}>Cashier</th>
+                    <th style={{border: '1px solid #333', padding: '6px 8px', background: '#fce7f3', fontWeight: 'bold', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase'}}>Pump</th>
+                    <th style={{width: '80px', border: '1px solid #333', padding: '6px 8px', background: '#fce7f3', fontWeight: 'bold', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase'}}>Fuel Type</th>
+                    <th style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#fce7f3', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Liters</th>
+                    <th style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#fce7f3', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Price/L</th>
+                    <th style={{width: '100px', border: '1px solid #333', padding: '6px 8px', background: '#fce7f3', fontWeight: 'bold', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase'}}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calibrations.map(cal => {
+                    const calAmount = parseFloat(cal.amount || (cal.liters * cal.price_per_liter) || 0)
+                    return (
+                      <tr key={cal.id}>
+                        <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>Shift {cal.shift_number}</td>
+                        <td style={{border: '1px solid #333', padding: '6px 8px'}}>{cal.cashiers?.full_name || 'Unknown'}</td>
+                        <td style={{border: '1px solid #333', padding: '6px 8px'}}>{cal.pumps?.pump_name || '—'}</td>
+                        <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'center'}}>{cal.pumps?.fuel_type || '—'}</td>
+                        <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>{parseFloat(cal.liters).toFixed(2)}</td>
+                        <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace'}}>₱{parseFloat(cal.price_per_liter).toFixed(2)}</td>
+                        <td style={{border: '1px solid #333', padding: '6px 8px', textAlign: 'right', fontFamily: 'Courier New, monospace', color: '#be185d'}}>₱{calAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      </tr>
+                    )
+                  })}
+                  <tr style={{background: '#fce7f3', borderTop: '2px solid #000'}}>
+                    <td colSpan="4" style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold', color: '#be185d'}}>TOTAL CALIBRATIONS ({totalCalibrationLiters.toFixed(2)}L):</td>
+                    <td colSpan="2" style={{border: '1px solid #333', padding: '8px'}}></td>
+                    <td style={{border: '1px solid #333', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontFamily: 'Courier New, monospace', color: '#be185d'}}>₱{totalCalibrations.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          )}
+
           {/* Grand Total */}
           <div className="mt-6 flex justify-end">
             <div className="grand-total-box">
@@ -597,6 +729,11 @@ export default function DailyReport() {
               <div>
                 <strong>Purchase Orders:</strong> {purchaseOrders.length} orders
               </div>
+              {calibrations.length > 0 && (
+                <div>
+                  <strong>Calibrations:</strong> {calibrations.length} ({totalCalibrationLiters.toFixed(2)}L)
+                </div>
+              )}
             </div>
           </div>
 

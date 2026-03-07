@@ -1,10 +1,12 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { supabase } from '../lib/supabase'
+import { supabase, recoverSession } from '../lib/supabase'
 import { useAuditStore } from './auditStore'
 
 // Track initialization outside of store to avoid any persist/hydration issues
 let _initStarted = false
+let _authSubscription = null
+let _visibilityHandler = null
 
 // Custom storage that doesn't sync across tabs to prevent POS actions from affecting admin
 const noSyncStorage = {
@@ -71,18 +73,60 @@ export const useAuthStore = create(
             set({ mode: get().cashier ? 'cashier' : 'none', loading: false })
           }
 
-          supabase.auth.onAuthStateChange(async (event, session) => {
+          // Clean up any existing subscription
+          if (_authSubscription) {
+            _authSubscription.unsubscribe()
+          }
+
+          const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log('[Auth] onAuthStateChange event:', event)
             if (event === 'SIGNED_OUT') {
               set({ adminUser: null, adminProfile: null, mode: 'none', cashier: null, attendanceId: null })
-            } else if (event === 'SIGNED_IN' && session?.user) {
-              const { data: profile } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', session.user.id)
-                .single()
-              set({ adminUser: session.user, adminProfile: profile, mode: 'admin' })
+            } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+              // Update adminUser on both SIGNED_IN and TOKEN_REFRESHED
+              // This ensures the store always has the latest valid session user
+              const currentProfile = get().adminProfile
+              if (!currentProfile || currentProfile.id !== session.user.id) {
+                const { data: profile } = await supabase
+                  .from('profiles')
+                  .select('*')
+                  .eq('id', session.user.id)
+                  .single()
+                set({ adminUser: session.user, adminProfile: profile, mode: get().cashier ? 'cashier' : 'admin' })
+              } else {
+                // Just update the user object (which contains the fresh JWT)
+                set({ adminUser: session.user })
+              }
             }
           })
+          _authSubscription = subscription
+
+          // Add visibility change listener to recover session after tab is backgrounded
+          if (_visibilityHandler) {
+            document.removeEventListener('visibilitychange', _visibilityHandler)
+          }
+          _visibilityHandler = async () => {
+            if (document.visibilityState === 'visible' && get().adminUser) {
+              console.log('[Auth] Tab became visible, checking session...')
+              try {
+                const { data: { session }, error } = await supabase.auth.getSession()
+                if (error || !session) {
+                  console.warn('[Auth] Session lost after tab switch, attempting recovery...')
+                  const recovered = await recoverSession()
+                  if (!recovered) {
+                    console.error('[Auth] Session recovery failed, user needs to re-login')
+                    set({ adminUser: null, adminProfile: null, mode: 'none' })
+                  }
+                } else {
+                  // Session is valid, update the user object with fresh token
+                  set({ adminUser: session.user })
+                }
+              } catch (e) {
+                console.error('[Auth] Visibility check error:', e)
+              }
+            }
+          }
+          document.addEventListener('visibilitychange', _visibilityHandler)
         } catch (error) {
           console.error('Auth initialization error:', error)
           set({ error: error.message, loading: false })

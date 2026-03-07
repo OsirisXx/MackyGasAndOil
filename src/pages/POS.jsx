@@ -2,24 +2,32 @@ import { useEffect, useState, useMemo } from 'react'
 import { useAuthStore } from '../stores/authStore'
 import { useFuelStore } from '../stores/fuelStore'
 import { useProductStore } from '../stores/productStore'
+import { usePumpStore } from '../stores/pumpStore'
+import { useBranchStore } from '../stores/branchStore'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
+import { getCurrentShift, getShiftsForBranch } from '../utils/shiftConfig'
+import { ensureCurrentShiftSnapshots } from '../services/shiftService'
 import {
   Fuel, DollarSign, Plus, ShoppingCart, FileText,
-  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi, Vault
+  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi, Vault, Truck, Gauge, Beaker
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
+import LivePumpReadings from '../components/LivePumpReadings'
+import CashierAccountability from '../components/CashierAccountability'
 
 export default function POS() {
   const { cashier, cashierCheckOut } = useAuthStore()
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
   const { products, fetchProducts } = useProductStore()
+  const { pumps, fetchPumps } = usePumpStore()
+  const { selectedBranchId, setSelectedBranch } = useBranchStore()
   const { isConnected, isOnline, isSupabaseConnected } = useConnectionStatus()
 
   // Transaction form
-  const [fuelTypeId, setFuelTypeId] = useState('')
+  const [pumpId, setPumpId] = useState('')
   const [amount, setAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [customerName, setCustomerName] = useState('')
@@ -30,7 +38,7 @@ export default function POS() {
   // PO form
   const [showPO, setShowPO] = useState(false)
   const [poCustomer, setPoCustomer] = useState('')
-  const [poFuelTypeId, setPoFuelTypeId] = useState('')
+  const [poPumpId, setPoPumpId] = useState('')
   const [poAmount, setPoAmount] = useState('')
   const [poPlate, setPoPlate] = useState('')
   const [poNotes, setPoNotes] = useState('')
@@ -49,18 +57,44 @@ export default function POS() {
   const [cart, setCart] = useState([]) // { product, quantity }
   const [productPaymentMethod, setProductPaymentMethod] = useState('cash')
 
-  // Cash deposit state
-  const [showDeposit, setShowDeposit] = useState(false)
-  const [depositAmount, setDepositAmount] = useState('')
-  const [depositNotes, setDepositNotes] = useState('')
+  // Vault state (unified deposits & withdrawals)
+  const [showVault, setShowVault] = useState(false)
+  const [vaultTab, setVaultTab] = useState('deposit') // 'deposit' or 'withdraw'
+  const [vaultAmount, setVaultAmount] = useState('')
+  const [vaultNotes, setVaultNotes] = useState('')
+  const [withdrawalReason, setWithdrawalReason] = useState('')
   const [todayDeposits, setTodayDeposits] = useState([])
+  const [todayWithdrawals, setTodayWithdrawals] = useState([])
+  const [vaultBalance, setVaultBalance] = useState(0)
+
+  // Pump readings panel state
+  const [showPumpReadings, setShowPumpReadings] = useState(false)
+  const [showAccountability, setShowAccountability] = useState(false)
+
+  // Calibration state
+  const [showCalibration, setShowCalibration] = useState(false)
+  const [calibrationPumpId, setCalibrationPumpId] = useState('')
+  const [calibrationLiters, setCalibrationLiters] = useState('')
+  const [calibrationNotes, setCalibrationNotes] = useState('')
+
+  // Set branch to cashier's branch on mount
+  useEffect(() => {
+    if (cashier?.branch_id && selectedBranchId !== cashier.branch_id) {
+      setSelectedBranch(cashier.branch_id)
+    }
+  }, [cashier])
 
   useEffect(() => {
     fetchFuelTypes()
     fetchProducts()
     fetchAllCustomers()
-    if (cashier) fetchTodayData()
-  }, [cashier])
+    if (cashier) {
+      fetchTodayData()
+      fetchPumps(cashier.branch_id || selectedBranchId)
+      // Ensure shift snapshots exist for current shift
+      ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name)
+    }
+  }, [cashier, selectedBranchId])
 
   // Fetch all unique customers from purchase_orders for autocomplete
   const fetchAllCustomers = async () => {
@@ -100,15 +134,15 @@ export default function POS() {
     setLoadingData(true)
     try {
       const today = format(new Date(), 'yyyy-MM-dd')
-      const [salesRes, poRes, prodRes, depositRes] = await Promise.all([
+      const [salesRes, poRes, prodRes, depositRes, withdrawalRes] = await Promise.all([
         supabase.from('cash_sales')
-          .select('*, fuel_types(short_code, name)')
+          .select('*, fuel_types(short_code, name), cashiers(full_name)')
           .eq('cashier_id', cashier.id)
           .gte('created_at', today + 'T00:00:00')
           .lte('created_at', today + 'T23:59:59')
           .order('created_at', { ascending: false }),
         supabase.from('purchase_orders')
-          .select('*, fuel_types(short_code, name)')
+          .select('*, fuel_types(short_code, name), cashiers(full_name)')
           .eq('cashier_id', cashier.id)
           .gte('created_at', today + 'T00:00:00')
           .lte('created_at', today + 'T23:59:59')
@@ -120,16 +154,28 @@ export default function POS() {
           .lte('created_at', today + 'T23:59:59')
           .order('created_at', { ascending: false }),
         supabase.from('cash_deposits')
-          .select('*')
+          .select('*, cashiers(full_name)')
           .eq('cashier_id', cashier.id)
           .gte('deposit_date', today + 'T00:00:00')
           .lte('deposit_date', today + 'T23:59:59')
           .order('deposit_date', { ascending: false }),
+        supabase.from('cash_withdrawals')
+          .select('*, cashiers(full_name)')
+          .eq('cashier_id', cashier.id)
+          .gte('withdrawal_date', today + 'T00:00:00')
+          .lte('withdrawal_date', today + 'T23:59:59')
+          .order('withdrawal_date', { ascending: false }),
       ])
       setTodaySales(salesRes.data || [])
       setTodayPOs(poRes.data || [])
       setTodayProductSales(prodRes.data || [])
       setTodayDeposits(depositRes.data || [])
+      setTodayWithdrawals(withdrawalRes.data || [])
+      
+      // Calculate vault balance for this branch
+      const totalDeposits = (depositRes.data || []).reduce((sum, d) => sum + parseFloat(d.amount || 0), 0)
+      const totalWithdrawals = (withdrawalRes.data || []).reduce((sum, w) => sum + parseFloat(w.amount || 0), 0)
+      setVaultBalance(totalDeposits - totalWithdrawals)
     } catch (err) {
       console.error('POS fetch error:', err)
     } finally {
@@ -138,8 +184,8 @@ export default function POS() {
   }
 
   // Computed
-  const selectedFuel = fuelTypes.find(f => f.id === fuelTypeId)
-  const liters = selectedFuel && amount ? (parseFloat(amount) / parseFloat(selectedFuel.current_price)).toFixed(3) : null
+  const selectedPump = pumps.find(p => p.id === pumpId)
+  const liters = selectedPump && amount ? (parseFloat(amount) / parseFloat(selectedPump.price_per_liter)).toFixed(3) : null
 
   const totalCashToday = useMemo(() =>
     todaySales.reduce((s, t) => s + parseFloat(t.amount || 0), 0), [todaySales])
@@ -152,16 +198,19 @@ export default function POS() {
       toast.error('No connection. Please check your internet and try again.')
       return
     }
-    if (!fuelTypeId || !amount) return toast.error('Please fill all required fields')
+    if (!pumpId || !amount) return toast.error('Please fill all required fields')
     setSaving(true)
     try {
+      // Find fuel_type_id based on pump's fuel_type text
+      const fuelTypeMatch = fuelTypes.find(ft => ft.name === selectedPump?.fuel_type)
       const { error } = await supabase.from('cash_sales').insert({
         cashier_id: cashier.id,
         branch_id: cashier.branch_id || null,
-        fuel_type_id: fuelTypeId || null,
+        pump_id: pumpId,
+        fuel_type_id: fuelTypeMatch?.id || null,
         amount: parseFloat(amount),
         liters: liters ? parseFloat(liters) : null,
-        price_per_liter: selectedFuel ? parseFloat(selectedFuel.current_price) : null,
+        price_per_liter: selectedPump ? parseFloat(selectedPump.price_per_liter) : null,
         payment_method: paymentMethod,
         customer_name: customerName || null,
         plate_number: plateNumber || null,
@@ -169,8 +218,8 @@ export default function POS() {
       })
       if (error) throw error
       toast.success(`₱${parseFloat(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} sale recorded!`)
-      logAudit('create', 'cash_sale', `Cash sale of ₱${parseFloat(amount).toFixed(2)}`, {
-        newValues: { amount: parseFloat(amount), fuel_type_id: fuelTypeId, payment_method: paymentMethod },
+      logAudit('create', 'cash_sale', `Cash sale of ₱${parseFloat(amount).toFixed(2)} - ${selectedPump?.pump_name}`, {
+        newValues: { amount: parseFloat(amount), pump_id: pumpId, payment_method: paymentMethod },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
@@ -198,31 +247,34 @@ export default function POS() {
     if (!poAmount || parseFloat(poAmount) <= 0) return toast.error('Enter a valid amount')
     setSaving(true)
     try {
-      const poFuel = fuelTypes.find(f => f.id === poFuelTypeId)
-      const poLiters = poFuel && poAmount ? (parseFloat(poAmount) / parseFloat(poFuel.current_price)).toFixed(3) : null
+      const poPump = pumps.find(p => p.id === poPumpId)
+      const poLiters = poPump && poAmount ? (parseFloat(poAmount) / parseFloat(poPump.price_per_liter)).toFixed(3) : null
+      // Find fuel_type_id based on pump's fuel_type text
+      const poFuelTypeMatch = fuelTypes.find(ft => ft.name === poPump?.fuel_type)
       const { error } = await supabase.from('purchase_orders').insert({
         cashier_id: cashier.id,
         branch_id: cashier.branch_id || null,
         customer_name: poCustomer,
-        fuel_type_id: poFuelTypeId || null,
+        pump_id: poPumpId || null,
+        fuel_type_id: poFuelTypeMatch?.id || null,
         amount: parseFloat(poAmount),
         liters: poLiters ? parseFloat(poLiters) : null,
-        price_per_liter: poFuel ? parseFloat(poFuel.current_price) : null,
+        price_per_liter: poPump ? parseFloat(poPump.price_per_liter) : null,
         plate_number: poPlate || null,
         notes: poNotes || null,
         status: 'unpaid',
       })
       if (error) throw error
       toast.success('Purchase order created!')
-      logAudit('create', 'purchase_order', `Purchase order of ₱${parseFloat(poAmount).toFixed(2)}`, {
-        newValues: { amount: parseFloat(poAmount), fuel_type_id: poFuelTypeId },
+      logAudit('create', 'purchase_order', `Purchase order of ₱${parseFloat(poAmount).toFixed(2)} - ${poPump?.pump_name}`, {
+        newValues: { amount: parseFloat(poAmount), pump_id: poPumpId },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
         cashierName: cashier.full_name,
       })
       setPoCustomer('')
-      setPoFuelTypeId('')
+      setPoPumpId('')
       setPoAmount('')
       setPoPlate('')
       setPoNotes('')
@@ -234,13 +286,13 @@ export default function POS() {
     setSaving(false)
   }
 
-  const handleCashDeposit = async (e) => {
+  const handleVaultDeposit = async (e) => {
     e.preventDefault()
     if (!isConnected) {
       toast.error('No connection. Please check your internet and try again.')
       return
     }
-    if (!depositAmount || parseFloat(depositAmount) <= 0) {
+    if (!vaultAmount || parseFloat(vaultAmount) <= 0) {
       return toast.error('Please enter a valid deposit amount')
     }
     setSaving(true)
@@ -248,22 +300,64 @@ export default function POS() {
       const { error } = await supabase.from('cash_deposits').insert({
         cashier_id: cashier.id,
         branch_id: cashier.branch_id || null,
-        amount: parseFloat(depositAmount),
-        notes: depositNotes || null,
+        amount: parseFloat(vaultAmount),
+        notes: vaultNotes || null,
         created_by: cashier.user_id,
       })
       if (error) throw error
-      toast.success(`₱${parseFloat(depositAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} deposited to vault!`)
-      logAudit('create', 'cash_deposit', `Cash deposit of ₱${parseFloat(depositAmount).toFixed(2)}`, {
-        newValues: { amount: parseFloat(depositAmount) },
+      toast.success(`₱${parseFloat(vaultAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} deposited to vault!`)
+      logAudit('create', 'cash_deposit', `Cash deposit of ₱${parseFloat(vaultAmount).toFixed(2)}`, {
+        newValues: { amount: parseFloat(vaultAmount) },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
         cashierName: cashier.full_name,
       })
-      setDepositAmount('')
-      setDepositNotes('')
-      setShowDeposit(false)
+      setVaultAmount('')
+      setVaultNotes('')
+      setShowVault(false)
+      fetchTodayData()
+    } catch (err) {
+      toast.error(err.message)
+    }
+    setSaving(false)
+  }
+
+  const handleVaultWithdrawal = async (e) => {
+    e.preventDefault()
+    if (!isConnected) {
+      toast.error('No connection. Please check your internet and try again.')
+      return
+    }
+    if (!vaultAmount || parseFloat(vaultAmount) <= 0) {
+      return toast.error('Please enter a valid withdrawal amount')
+    }
+    if (!withdrawalReason || withdrawalReason.trim() === '') {
+      return toast.error('Please provide a reason for withdrawal')
+    }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('cash_withdrawals').insert({
+        cashier_id: cashier.id,
+        branch_id: cashier.branch_id || null,
+        amount: parseFloat(vaultAmount),
+        reason: withdrawalReason,
+        notes: vaultNotes || null,
+        created_by: cashier.user_id,
+      })
+      if (error) throw error
+      toast.success(`₱${parseFloat(vaultAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} withdrawn from vault!`)
+      logAudit('create', 'cash_withdrawal', `Cash withdrawal of ₱${parseFloat(vaultAmount).toFixed(2)} - ${withdrawalReason}`, {
+        newValues: { amount: parseFloat(vaultAmount), reason: withdrawalReason },
+        branchId: cashier.branch_id,
+        branchName: cashier.branches?.name,
+        cashierId: cashier.id,
+        cashierName: cashier.full_name,
+      })
+      setVaultAmount('')
+      setWithdrawalReason('')
+      setVaultNotes('')
+      setShowVault(false)
       fetchTodayData()
     } catch (err) {
       toast.error(err.message)
@@ -275,6 +369,62 @@ export default function POS() {
     if (!confirm('End your shift and check out?')) return
     await cashierCheckOut()
     toast.success('Shift ended. Goodbye!')
+  }
+
+  // Calibration handler
+  const handleCalibration = async (e) => {
+    e.preventDefault()
+    if (!isConnected) {
+      toast.error('No connection. Please check your internet and try again.')
+      return
+    }
+    if (!calibrationPumpId) return toast.error('Please select a pump')
+    if (!calibrationLiters || parseFloat(calibrationLiters) <= 0) {
+      return toast.error('Please enter valid liters')
+    }
+    
+    const selectedCalibrationPump = pumps.find(p => p.id === calibrationPumpId)
+    if (!selectedCalibrationPump) return toast.error('Invalid pump selected')
+    
+    setSaving(true)
+    try {
+      const litersVal = parseFloat(calibrationLiters)
+      const pricePerLiter = parseFloat(selectedCalibrationPump.price_per_liter)
+      const amountVal = litersVal * pricePerLiter
+      
+      const { error } = await supabase.from('pump_calibrations').insert({
+        cashier_id: cashier.id,
+        branch_id: cashier.branch_id || null,
+        pump_id: calibrationPumpId,
+        liters: litersVal,
+        price_per_liter: pricePerLiter,
+        shift_date: format(new Date(), 'yyyy-MM-dd'),
+        shift_number: currentShift,
+        reason: 'Calibration',
+        notes: calibrationNotes || null,
+      })
+      if (error) throw error
+      
+      toast.success(`Calibration recorded: ${litersVal} liters (₱${amountVal.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`)
+      logAudit('create', 'pump_calibration', `Calibration of ${litersVal}L on ${selectedCalibrationPump.pump_name}`, {
+        newValues: { liters: litersVal, pump_id: calibrationPumpId, amount: amountVal },
+        branchId: cashier.branch_id,
+        branchName: cashier.branches?.name,
+        cashierId: cashier.id,
+        cashierName: cashier.full_name,
+      })
+      
+      // Reset and close
+      setCalibrationPumpId('')
+      setCalibrationLiters('')
+      setCalibrationNotes('')
+      setShowCalibration(false)
+      fetchTodayData()
+      fetchPumps(cashier.branch_id || selectedBranchId) // Refresh pump readings
+    } catch (err) {
+      toast.error(err.message)
+    }
+    setSaving(false)
   }
 
   // Product cart functions
@@ -466,9 +616,30 @@ export default function POS() {
               <span className="text-xs font-medium text-green-600">Connected</span>
             </div>
           )}
+          <button
+            onClick={() => setShowPumpReadings(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-lg text-sm font-medium transition-colors">
+            <Gauge size={16} /> Pump Readings
+          </button>
+          <button
+            onClick={() => setShowAccountability(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-sm font-medium transition-colors">
+            <FileText size={16} /> Accountability
+          </button>
+          <button
+            onClick={() => setShowCalibration(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-pink-50 text-pink-600 hover:bg-pink-100 rounded-lg text-sm font-medium transition-colors">
+            <Beaker size={16} /> Calibration
+          </button>
+          <a href="/fuel-delivery"
+            className="flex items-center gap-1.5 px-3 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-sm font-medium transition-colors">
+            <Truck size={16} /> Fuel Delivery
+          </a>
           <div className="text-right">
             <p className="text-sm font-medium text-gray-700">{cashier?.full_name}</p>
-            <p className="text-[10px] text-gray-400">{format(new Date(), 'MMM d, yyyy — h:mm a')}</p>
+            <p className="text-[10px] text-gray-400">
+              {format(new Date(), 'MMM d, yyyy — h:mm a')} • <span className="font-semibold text-blue-600">{getShiftsForBranch(cashier?.branches?.name)?.find(s => s.number === getCurrentShift(cashier?.branches?.name))?.label || `Shift ${getCurrentShift(cashier?.branches?.name)}`}</span>
+            </p>
           </div>
           <button onClick={handleEndShift}
             className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-sm font-medium transition-colors">
@@ -526,48 +697,57 @@ export default function POS() {
                       className="text-xs text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1">
                       <CreditCard size={14} /> Purchase Order
                     </button>
-                    <button onClick={() => setShowDeposit(true)}
+                    <button onClick={() => setShowVault(true)}
                       className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
-                      <Vault size={14} /> Cash Deposit
+                      <Vault size={14} /> Vault
                     </button>
                   </div>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-3">
-                  {/* Fuel Type Quick Select */}
+                  {/* Pump Selection */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-2">Fuel Type</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {fuelTypes.filter(f => !f.is_discounted).map(ft => (
-                        <button key={ft.id} type="button"
-                          onClick={() => setFuelTypeId(ft.id)}
-                          className={`p-2.5 rounded-lg border-2 text-center transition-all ${
-                            fuelTypeId === ft.id
-                              ? 'border-blue-500 bg-blue-50 text-blue-700'
-                              : 'border-gray-100 hover:border-gray-300 text-gray-600'
-                          }`}>
-                          <p className="font-bold text-sm">{ft.short_code}</p>
-                          <p className="text-[10px] text-gray-400">₱{parseFloat(ft.current_price).toFixed(2)}/L</p>
-                        </button>
-                      ))}
-                    </div>
-                    {fuelTypes.some(f => f.is_discounted) && (
-                      <div className="mt-3">
-                        <p className="text-[10px] text-amber-600 font-medium mb-2">Discounted Prices</p>
-                        <div className="grid grid-cols-3 gap-2">
-                          {fuelTypes.filter(f => f.is_discounted).map(ft => (
-                            <button key={ft.id} type="button"
-                              onClick={() => setFuelTypeId(ft.id)}
-                              className={`p-2 rounded-lg border-2 text-center transition-all ${
-                                fuelTypeId === ft.id
-                                  ? 'border-amber-500 bg-amber-50 text-amber-700'
-                                  : 'border-gray-100 hover:border-gray-300 text-gray-600'
+                    <label className="block text-xs font-medium text-gray-500 mb-2">Select Pump</label>
+                    {pumps.length === 0 ? (
+                      <div className="text-center py-4 text-gray-400 text-sm">
+                        No pumps configured. Contact admin.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {pumps.sort((a, b) => {
+                          // Sort by fuel type first (Premium, Diesel, Unleaded)
+                          if (a.fuel_type !== b.fuel_type) {
+                            return a.fuel_type.localeCompare(b.fuel_type)
+                          }
+                          // Then by pump number
+                          return a.pump_number - b.pump_number
+                        }).map(pump => (
+                          <button key={pump.id} type="button"
+                            onClick={() => setPumpId(pump.id)}
+                            className={`p-3 rounded-lg border-2 transition-all ${
+                              pumpId === pump.id
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}>
+                            <div className="flex items-center justify-between gap-1 mb-1">
+                              <span className={`text-base font-bold ${pumpId === pump.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                                #{pump.pump_number} {pump.fuel_type}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between mt-2">
+                              <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
+                                pump.category === 'discounted' 
+                                  ? 'bg-amber-100 text-amber-700' 
+                                  : 'bg-gray-100 text-gray-600'
                               }`}>
-                              <p className="font-bold text-xs">{ft.short_code}</p>
-                              <p className="text-[10px] text-gray-400">₱{parseFloat(ft.current_price).toFixed(2)}/L</p>
-                            </button>
-                          ))}
-                        </div>
+                                {pump.category === 'discounted' ? 'Discounted' : 'Regular'}
+                              </span>
+                              <span className={`text-xs font-bold ${pumpId === pump.id ? 'text-blue-700' : 'text-gray-700'}`}>
+                                ₱{parseFloat(pump.price_per_liter).toFixed(2)}/L
+                              </span>
+                            </div>
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -579,9 +759,9 @@ export default function POS() {
                       onChange={e => setAmount(e.target.value)}
                       className="w-full px-4 py-4 border border-gray-200 rounded-xl text-3xl font-bold text-center text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none"
                       placeholder="0.00" autoFocus required />
-                    {liters && (
+                    {liters && selectedPump && (
                       <p className="text-center text-sm text-blue-600 mt-1 font-medium">
-                        ≈ {liters} liters of {selectedFuel?.short_code}
+                        ≈ {liters} liters • {selectedPump.pump_name}
                       </p>
                     )}
                   </div>
@@ -677,21 +857,49 @@ export default function POS() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-2">Fuel Type</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {fuelTypes.filter(f => !f.is_discounted).map(ft => (
-                        <button key={ft.id} type="button"
-                          onClick={() => setPoFuelTypeId(ft.id)}
-                          className={`p-2 rounded-lg border-2 text-center transition-all text-xs ${
-                            poFuelTypeId === ft.id
-                              ? 'border-amber-500 bg-amber-50 text-amber-700'
-                              : 'border-gray-100 hover:border-gray-300 text-gray-600'
-                          }`}>
-                          <p className="font-bold">{ft.short_code}</p>
-                          <p className="text-[10px] text-gray-400">₱{parseFloat(ft.current_price).toFixed(2)}</p>
-                        </button>
-                      ))}
-                    </div>
+                    <label className="block text-xs font-medium text-gray-500 mb-2">Select Pump</label>
+                    {pumps.length === 0 ? (
+                      <div className="text-center py-4 text-gray-400 text-xs">
+                        No pumps configured
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        {pumps.sort((a, b) => {
+                          // Sort by fuel type first (Premium, Diesel, Unleaded)
+                          if (a.fuel_type !== b.fuel_type) {
+                            return a.fuel_type.localeCompare(b.fuel_type)
+                          }
+                          // Then by pump number
+                          return a.pump_number - b.pump_number
+                        }).map(pump => (
+                          <button key={pump.id} type="button"
+                            onClick={() => setPoPumpId(pump.id)}
+                            className={`p-2.5 rounded-lg border-2 transition-all ${
+                              poPumpId === pump.id
+                                ? 'border-amber-500 bg-amber-50'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}>
+                            <div className="flex items-center justify-between gap-1 mb-1">
+                              <span className={`text-sm font-bold ${poPumpId === pump.id ? 'text-amber-700' : 'text-gray-800'}`}>
+                                #{pump.pump_number} {pump.fuel_type}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${
+                                pump.category === 'discounted' 
+                                  ? 'bg-amber-100 text-amber-700' 
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {pump.category === 'discounted' ? 'Discounted' : 'Regular'}
+                              </span>
+                              <span className={`text-[10px] font-bold ${poPumpId === pump.id ? 'text-amber-700' : 'text-gray-700'}`}>
+                                ₱{parseFloat(pump.price_per_liter).toFixed(2)}/L
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -777,6 +985,8 @@ export default function POS() {
                           </div>
                           <p className="text-[10px] text-gray-400">
                             {format(new Date(sale.created_at), 'h:mm a')}
+                            {sale.cashiers?.full_name && ` • ${sale.cashiers.full_name}`}
+                            {sale.fuel_types?.name && ` • ${sale.fuel_types.name}`}
                             {sale.plate_number && ` — ${sale.plate_number}`}
                             {sale.customer_name && ` — ${sale.customer_name}`}
                           </p>
@@ -804,7 +1014,10 @@ export default function POS() {
                             </span>
                           </div>
                           <p className="text-[10px] text-gray-400">
-                            {format(new Date(po.created_at), 'h:mm a')} — PO: {po.customer_name}
+                            {format(new Date(po.created_at), 'h:mm a')}
+                            {po.cashiers?.full_name && ` • ${po.cashiers.full_name}`}
+                            {po.fuel_types?.name && ` • ${po.fuel_types.name}`}
+                            {` — PO: ${po.customer_name}`}
                             {po.plate_number && ` (${po.plate_number})`}
                           </p>
                         </div>
@@ -829,7 +1042,9 @@ export default function POS() {
                             </span>
                           </div>
                           <p className="text-[10px] text-gray-400">
-                            {format(new Date(ps.created_at), 'h:mm a')} • {ps.payment_method}
+                            {format(new Date(ps.created_at), 'h:mm a')}
+                            {ps.cashier_name && ` • ${ps.cashier_name}`}
+                            {` • ${ps.payment_method}`}
                           </p>
                         </div>
                       </div>
@@ -994,56 +1209,298 @@ export default function POS() {
         </div>
       )}
 
-      {/* Cash Deposit Modal */}
-      {showDeposit && (
+      {/* Vault Modal (Unified Deposit & Withdrawal) */}
+      {showVault && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+            {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <div className="flex items-center gap-2">
                 <Vault size={20} className="text-blue-600" />
-                <h2 className="text-lg font-semibold text-gray-800">Cash Deposit to Vault</h2>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800">Vault Management</h2>
+                  <p className="text-xs text-gray-500">{cashier?.branches?.name}</p>
+                </div>
               </div>
-              <button onClick={() => setShowDeposit(false)}
+              <button onClick={() => setShowVault(false)}
                 className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
                 <Plus size={20} className="rotate-45 text-gray-400" />
               </button>
             </div>
 
-            <form onSubmit={handleCashDeposit} className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Deposit Amount (₱) *</label>
-                <input type="number" step="0.01" value={depositAmount}
-                  onChange={e => setDepositAmount(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl text-2xl font-bold text-center text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="0.00" required autoFocus />
+            {/* Two Column Layout */}
+            <div className="flex flex-1 overflow-hidden">
+              {/* LEFT SIDE - Form */}
+              <div className="w-1/2 border-r border-gray-200 flex flex-col">
+                {/* Tabs */}
+                <div className="flex border-b">
+                  <button
+                    onClick={() => setVaultTab('deposit')}
+                    className={`flex-1 py-3 text-sm font-semibold ${
+                      vaultTab === 'deposit'
+                        ? 'text-blue-600 border-b-2 border-blue-600'
+                        : 'text-gray-500'
+                    }`}
+                  >
+                    Deposit
+                  </button>
+                  <button
+                    onClick={() => setVaultTab('withdraw')}
+                    className={`flex-1 py-3 text-sm font-semibold ${
+                      vaultTab === 'withdraw'
+                        ? 'text-orange-600 border-b-2 border-orange-600'
+                        : 'text-gray-500'
+                    }`}
+                  >
+                    Withdraw
+                  </button>
+                </div>
+
+                {/* Forms */}
+                <div className="flex-1 overflow-y-auto">
+                  {vaultTab === 'deposit' && (
+                    <form onSubmit={handleVaultDeposit} className="p-6 space-y-4">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Amount (₱)</label>
+                        <input type="number" step="0.01" value={vaultAmount}
+                          onChange={e => setVaultAmount(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-2xl font-bold text-center focus:ring-2 focus:ring-blue-500 outline-none"
+                          placeholder="0.00" required autoFocus />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+                        <textarea value={vaultNotes} onChange={e => setVaultNotes(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                          placeholder="Optional notes..." rows="3" />
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <button type="button" onClick={() => setShowVault(false)}
+                          className="flex-1 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50">
+                          Cancel
+                        </button>
+                        <button type="submit" disabled={saving || !vaultAmount}
+                          className="flex-1 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                          {saving ? 'Saving...' : 'Deposit'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {vaultTab === 'withdraw' && (
+                    <form onSubmit={handleVaultWithdrawal} className="p-6 space-y-4">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Amount (₱)</label>
+                        <input type="number" step="0.01" value={vaultAmount}
+                          onChange={e => setVaultAmount(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg text-2xl font-bold text-center focus:ring-2 focus:ring-orange-500 outline-none"
+                          placeholder="0.00" required autoFocus />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Reason</label>
+                        <select value={withdrawalReason} onChange={e => setWithdrawalReason(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 outline-none"
+                          required>
+                          <option value="">Select reason...</option>
+                          <option value="Change for customer">Change for customer</option>
+                          <option value="Petty cash">Petty cash</option>
+                          <option value="Expenses">Expenses</option>
+                          <option value="Emergency">Emergency</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+                        <textarea value={vaultNotes} onChange={e => setVaultNotes(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 outline-none resize-none"
+                          placeholder="Optional notes..." rows="3" />
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <button type="button" onClick={() => setShowVault(false)}
+                          className="flex-1 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50">
+                          Cancel
+                        </button>
+                        <button type="submit" disabled={saving || !vaultAmount || !withdrawalReason}
+                          className="flex-1 py-2.5 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50">
+                          {saving ? 'Saving...' : 'Withdraw'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Notes (Optional)</label>
-                <textarea value={depositNotes} onChange={e => setDepositNotes(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  placeholder="Add any notes about this deposit..."
-                  rows="3" />
-              </div>
+              {/* RIGHT SIDE - Balance & Logs */}
+              <div className="w-1/2 flex flex-col overflow-hidden">
+                {/* Balance */}
+                <div className="bg-blue-600 p-6 text-center text-white">
+                  <p className="text-xs mb-1">Current Balance</p>
+                  <p className="text-4xl font-bold">₱{vaultBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                  <div className="flex gap-6 justify-center mt-3 text-sm">
+                    <div>
+                      <p className="text-xs opacity-80">Deposits</p>
+                      <p className="font-semibold">₱{todayDeposits.reduce((s, d) => s + parseFloat(d.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs opacity-80">Withdrawals</p>
+                      <p className="font-semibold">₱{todayWithdrawals.reduce((s, w) => s + parseFloat(w.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
+                </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-xs text-blue-800">
-                  <strong>Note:</strong> This deposit will be recorded and cannot be edited by you. Only admins can modify deposit records.
+                {/* Transactions */}
+                <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+                  <h3 className="text-xs font-semibold text-gray-600 mb-3">Today's Transactions</h3>
+                  <div className="space-y-2">
+                    {[...todayDeposits.map(d => ({ ...d, type: 'deposit' })), ...todayWithdrawals.map(w => ({ ...w, type: 'withdrawal' }))]
+                      .sort((a, b) => new Date(b.deposit_date || b.withdrawal_date) - new Date(a.deposit_date || a.withdrawal_date))
+                      .map((t, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs bg-white p-3 rounded-lg border">
+                          <div className="flex items-center gap-2">
+                            {t.type === 'deposit' ? <Plus size={14} className="text-blue-600" /> : <Minus size={14} className="text-orange-600" />}
+                            <div>
+                              <p className="font-medium">{t.type === 'deposit' ? 'Deposit' : 'Withdrawal'}</p>
+                              <p className="text-[10px] text-gray-500">
+                                {format(new Date(t.deposit_date || t.withdrawal_date), 'h:mm a')} • {t.cashiers?.full_name || 'Unknown'}
+                              </p>
+                              {t.reason && <p className="text-[10px] text-orange-600">{t.reason}</p>}
+                            </div>
+                          </div>
+                          <span className={`font-semibold ${t.type === 'deposit' ? 'text-blue-600' : 'text-orange-600'}`}>
+                            {t.type === 'deposit' ? '+' : '-'}₱{parseFloat(t.amount).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    {todayDeposits.length === 0 && todayWithdrawals.length === 0 && (
+                      <p className="text-xs text-gray-400 text-center py-8">No transactions today</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Pump Readings (View Only) */}
+      <LivePumpReadings 
+        isOpen={showPumpReadings} 
+        onClose={() => setShowPumpReadings(false)} 
+      />
+
+      {/* Cashier Accountability */}
+      <CashierAccountability
+        isOpen={showAccountability}
+        onClose={() => setShowAccountability(false)}
+      />
+
+      {/* Calibration Modal */}
+      {showCalibration && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="bg-gradient-to-r from-pink-600 to-pink-700 text-white p-4 rounded-t-2xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <Beaker className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="font-bold">Pump Calibration</h2>
+                    <p className="text-pink-100 text-xs">Record calibration (not a sale)</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowCalibration(false)
+                    setCalibrationPumpId('')
+                    setCalibrationLiters('')
+                    setCalibrationNotes('')
+                  }}
+                  className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+                >
+                  <Plus className="w-5 h-5 rotate-45" />
+                </button>
+              </div>
+            </div>
+            
+            <form onSubmit={handleCalibration} className="p-4 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-sm text-amber-800">
+                  <strong>Note:</strong> Calibration adds liters to the pump reading but is NOT counted as a sale. 
+                  It will be shown as a deduction in the accountability report.
                 </p>
               </div>
 
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setShowDeposit(false)}
-                  className="flex-1 py-3 border border-gray-200 text-gray-600 font-semibold rounded-xl hover:bg-gray-50 transition-colors">
-                  Cancel
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Pump *</label>
+                <select
+                  value={calibrationPumpId}
+                  onChange={(e) => setCalibrationPumpId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none"
+                  required
+                >
+                  <option value="">Choose a pump...</option>
+                  {pumps.map(pump => (
+                    <option key={pump.id} value={pump.id}>
+                      #{pump.pump_number} {pump.pump_name} - ₱{parseFloat(pump.price_per_liter).toFixed(2)}/L
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Liters *</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={calibrationLiters}
+                  onChange={(e) => setCalibrationLiters(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none font-mono text-lg"
+                  placeholder="e.g., 10"
+                  required
+                />
+              </div>
+
+              {calibrationPumpId && calibrationLiters && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-sm text-gray-600">
+                    Amount (deduction): <span className="font-mono font-semibold text-pink-600">
+                      ₱{(parseFloat(calibrationLiters || 0) * parseFloat(pumps.find(p => p.id === calibrationPumpId)?.price_per_liter || 0)).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+                <input
+                  type="text"
+                  value={calibrationNotes}
+                  onChange={(e) => setCalibrationNotes(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none"
+                  placeholder="e.g., Monthly calibration test"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={saving || !calibrationPumpId || !calibrationLiters}
+                  className="flex-1 py-2.5 bg-pink-600 text-white rounded-lg font-medium hover:bg-pink-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  <Beaker size={18} />
+                  Record Calibration
                 </button>
-                <button type="submit" disabled={saving || !depositAmount}
-                  className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50">
-                  {saving ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <><Vault size={18} /> Deposit Cash</>
-                  )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCalibration(false)
+                    setCalibrationPumpId('')
+                    setCalibrationLiters('')
+                    setCalibrationNotes('')
+                  }}
+                  className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
                 </button>
               </div>
             </form>

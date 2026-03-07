@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useBranchStore } from '../stores/branchStore'
 import { supabase } from '../lib/supabase'
-import { TrendingUp, Calendar, Download, Fuel, DollarSign, Receipt, ShoppingBag, Users, RefreshCw } from 'lucide-react'
-import { format, subDays, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from 'date-fns'
+import { TrendingUp, Calendar, Download, Fuel, DollarSign, Receipt, ShoppingBag, Users, RefreshCw, Printer } from 'lucide-react'
+import { format, subDays, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, startOfYear, endOfYear, subMonths } from 'date-fns'
 
 export default function Reports() {
   const { selectedBranchId } = useBranchStore()
@@ -79,7 +79,128 @@ export default function Reports() {
         setStartDate(format(startOfMonth(now), 'yyyy-MM-dd'))
         setEndDate(format(endOfMonth(now), 'yyyy-MM-dd'))
         break
+      case 'lastMonth':
+        const lastMonth = subMonths(now, 1)
+        setStartDate(format(startOfMonth(lastMonth), 'yyyy-MM-dd'))
+        setEndDate(format(endOfMonth(lastMonth), 'yyyy-MM-dd'))
+        break
+      case 'year':
+        setStartDate(format(startOfYear(now), 'yyyy-MM-dd'))
+        setEndDate(format(endOfYear(now), 'yyyy-MM-dd'))
+        break
     }
+  }
+
+  const handlePrint = () => {
+    const printWindow = window.open('', '_blank')
+    const periodLabel = startDate === endDate ? format(parseISO(startDate), 'MMMM d, yyyy') : 
+      `${format(parseISO(startDate), 'MMM d, yyyy')} - ${format(parseISO(endDate), 'MMM d, yyyy')}`
+    
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Sales Report - ${periodLabel}</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; font-size: 11px; padding: 20px; }
+            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            .header h1 { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+            .header p { font-size: 10px; color: #666; }
+            .period { text-align: center; margin-bottom: 20px; font-size: 12px; font-weight: bold; }
+            .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+            .summary-card { border: 1px solid #ddd; padding: 10px; background: #f9f9f9; }
+            .summary-card .label { font-size: 9px; color: #666; margin-bottom: 5px; }
+            .summary-card .value { font-size: 14px; font-weight: bold; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th, td { border: 1px solid #000; padding: 6px 8px; text-align: left; font-size: 10px; }
+            th { background: #f0f0f0; font-weight: bold; }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            .total-row { font-weight: bold; background: #f5f5f5; }
+            .footer { margin-top: 30px; font-size: 9px; }
+            @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>MACKY OIL&GAS</h1>
+            <p>Lower Sosohon, Manolo Fortich, Bukidnon</p>
+            <h2 style="margin-top: 10px; font-size: 14px;">SALES REPORT</h2>
+          </div>
+          <div class="period">Period: ${periodLabel}</div>
+          
+          <div class="summary">
+            <div class="summary-card">
+              <div class="label">CASH SALES</div>
+              <div class="value">₱${summary.totalCashSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              <div class="label">${summary.cashSalesCount} transactions</div>
+            </div>
+            <div class="summary-card">
+              <div class="label">PURCHASE ORDERS</div>
+              <div class="value">₱${summary.totalPurchaseOrders.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              <div class="label">${summary.poCount} transactions</div>
+            </div>
+            <div class="summary-card">
+              <div class="label">TOTAL SALES</div>
+              <div class="value">₱${(summary.totalCashSales + summary.totalPurchaseOrders).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              <div class="label">${summary.cashSalesCount + summary.poCount} total transactions</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th class="text-right">Cash Sales</th>
+                <th class="text-right">Purchase Orders</th>
+                <th class="text-right">Total</th>
+                <th class="text-center">Transactions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${dailyData.map(d => `
+                <tr>
+                  <td>${format(parseISO(d.date), 'MMM d, yyyy')}</td>
+                  <td class="text-right">₱${d.cashSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td class="text-right">₱${d.purchaseOrders.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td class="text-right">₱${d.total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td class="text-center">${d.cashSalesCount + d.poCount}</td>
+                </tr>
+              `).join('')}
+              <tr class="total-row">
+                <td>TOTAL</td>
+                <td class="text-right">₱${summary.totalCashSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td class="text-right">₱${summary.totalPurchaseOrders.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td class="text-right">₱${(summary.totalCashSales + summary.totalPurchaseOrders).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td class="text-center">${summary.cashSalesCount + summary.poCount}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="summary">
+            <div class="summary-card">
+              <div class="label">UNPAID PURCHASE ORDERS</div>
+              <div class="value" style="color: #dc2626;">₱${summary.totalUnpaidPOs.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div class="summary-card">
+              <div class="label">UNIQUE CASHIERS</div>
+              <div class="value">${summary.uniqueCashiers}</div>
+            </div>
+            <div class="summary-card">
+              <div class="label">TOTAL TRANSACTIONS</div>
+              <div class="value">${summary.cashSalesCount + summary.poCount}</div>
+            </div>
+          </div>
+
+          <div class="footer">
+            <p>Generated on: ${format(new Date(), 'MMMM d, yyyy h:mm a')}</p>
+            <p style="margin-top: 20px;">Prepared by: _____________________________</p>
+          </div>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.print()
   }
 
   return (
@@ -89,11 +210,18 @@ export default function Reports() {
           <h1 className="text-2xl font-bold text-gray-800">Reports</h1>
           <p className="text-gray-500 text-sm">Sales and accountability summary reports</p>
         </div>
-        <button onClick={fetchReports} disabled={loading}
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 transition-colors disabled:opacity-50">
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          {loading ? 'Loading...' : 'Refresh'}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={handlePrint} disabled={loading || dailyData.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <Printer size={16} />
+            Print Report
+          </button>
+          <button onClick={fetchReports} disabled={loading}
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 transition-colors disabled:opacity-50">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -108,11 +236,17 @@ export default function Reports() {
           <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
-        <div className="flex gap-1">
-          {['today', 'week', 'month'].map(p => (
-            <button key={p} onClick={() => setPreset(p)}
-              className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium transition-colors capitalize">
-              {p === 'week' ? '7 Days' : p === 'month' ? 'This Month' : 'Today'}
+        <div className="flex gap-1 flex-wrap">
+          {[
+            { key: 'today', label: 'Today' },
+            { key: 'week', label: '7 Days' },
+            { key: 'month', label: 'This Month' },
+            { key: 'lastMonth', label: 'Last Month' },
+            { key: 'year', label: 'This Year' }
+          ].map(p => (
+            <button key={p.key} onClick={() => setPreset(p.key)}
+              className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium transition-colors">
+              {p.label}
             </button>
           ))}
         </div>

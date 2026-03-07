@@ -18,9 +18,12 @@ import Attendance from './pages/Attendance'
 import PurchaseOrders from './pages/PurchaseOrders'
 import BranchManagement from './pages/BranchManagement'
 import AuditLog from './pages/AuditLog'
-import ShiftReadings from './pages/ShiftReadings'
 import AccountabilityReport from './pages/AccountabilityReport'
 import CashDeposits from './pages/CashDeposits'
+import FuelDelivery from './pages/FuelDelivery'
+import AdminFuelDeliveries from './pages/AdminFuelDeliveries'
+import FuelReconciliation from './pages/FuelReconciliation'
+import PumpManagement from './pages/PumpManagement'
 
 function App() {
   const { initialize, loading, mode } = useAuthStore()
@@ -50,6 +53,11 @@ function App() {
           <POS />
         </CashierRoute>
       } />
+      <Route path="/fuel-delivery" element={
+        <CashierRoute>
+          <FuelDelivery />
+        </CashierRoute>
+      } />
 
       {/* Admin Panel (sidebar layout) */}
       <Route path="/admin/*" element={
@@ -69,9 +77,11 @@ function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/branches" element={<BranchManagement />} />
               <Route path="/audit-log" element={<AuditLog />} />
-              <Route path="/shift-readings" element={<ShiftReadings />} />
               <Route path="/accountability-report" element={<AccountabilityReport />} />
               <Route path="/cash-deposits" element={<CashDeposits />} />
+              <Route path="/fuel-deliveries" element={<AdminFuelDeliveries />} />
+              <Route path="/fuel-reconciliation" element={<FuelReconciliation />} />
+              <Route path="/pump-management" element={<PumpManagement />} />
             </Routes>
           </Layout>
         </AdminRoute>

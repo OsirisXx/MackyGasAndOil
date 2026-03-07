@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, recoverSession } from '../lib/supabase'
 
 export function useConnectionStatus() {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
@@ -14,11 +14,24 @@ export function useConnectionStatus() {
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
-    // Periodic Supabase health check
+    // Periodic Supabase health check with session recovery
     const checkSupabase = async () => {
       try {
         const { error } = await supabase.from('branches').select('id').limit(1)
-        setIsSupabaseConnected(!error)
+        if (error) {
+          console.warn('[ConnectionCheck] Query failed:', error.message)
+          // Attempt session recovery before marking as disconnected
+          const recovered = await recoverSession()
+          if (recovered) {
+            // Retry the query after recovery
+            const { error: retryError } = await supabase.from('branches').select('id').limit(1)
+            setIsSupabaseConnected(!retryError)
+          } else {
+            setIsSupabaseConnected(false)
+          }
+        } else {
+          setIsSupabaseConnected(true)
+        }
         setLastChecked(Date.now())
       } catch (err) {
         setIsSupabaseConnected(false)
@@ -26,9 +39,9 @@ export function useConnectionStatus() {
       }
     }
 
-    // Check immediately and then every 30 seconds
+    // Check immediately and then every 60 seconds (reduced from 30s to avoid excessive calls)
     checkSupabase()
-    const interval = setInterval(checkSupabase, 30000)
+    const interval = setInterval(checkSupabase, 60000)
 
     return () => {
       window.removeEventListener('online', handleOnline)
@@ -44,3 +57,4 @@ export function useConnectionStatus() {
     lastChecked,
   }
 }
+
