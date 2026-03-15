@@ -201,6 +201,10 @@ export default function POS() {
     if (!pumpId || !amount) return toast.error('Please fill all required fields')
     setSaving(true)
     try {
+      // IMPORTANT: Ensure shift snapshots exist BEFORE recording the sale
+      // This guarantees the trigger can update the snapshot's ending_reading
+      await ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name)
+      
       // Find fuel_type_id based on pump's fuel_type text
       const fuelTypeMatch = fuelTypes.find(ft => ft.name === selectedPump?.fuel_type)
       const { error } = await supabase.from('cash_sales').insert({
@@ -247,6 +251,9 @@ export default function POS() {
     if (!poAmount || parseFloat(poAmount) <= 0) return toast.error('Enter a valid amount')
     setSaving(true)
     try {
+      // IMPORTANT: Ensure shift snapshots exist BEFORE recording the PO
+      await ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name)
+      
       const poPump = pumps.find(p => p.id === poPumpId)
       const poLiters = poPump && poAmount ? (parseFloat(poAmount) / parseFloat(poPump.price_per_liter)).toFixed(3) : null
       // Find fuel_type_id based on pump's fuel_type text
@@ -399,7 +406,7 @@ export default function POS() {
         liters: litersVal,
         price_per_liter: pricePerLiter,
         shift_date: format(new Date(), 'yyyy-MM-dd'),
-        shift_number: currentShift,
+        shift_number: getCurrentShift(cashier?.branches?.name),
         reason: 'Calibration',
         notes: calibrationNotes || null,
       })

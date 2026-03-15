@@ -26,17 +26,27 @@ export default function CashierAccountability({ isOpen, onClose }) {
   const [calibrations, setCalibrations] = useState([])
 
   const currentBranch = branches.find(b => b.id === selectedBranchId)
-  const currentShift = getCurrentShift(currentBranch?.name)
+  const autoShift = getCurrentShift(currentBranch?.name)
   const shifts = getShiftsForBranch(currentBranch?.name)
-  const shiftLabel = shifts.find(s => s.number === currentShift)?.label || `Shift ${currentShift}`
+  
+  // Allow cashier to select which shift to view
+  const [selectedShift, setSelectedShift] = useState(autoShift)
+  const shiftLabel = shifts.find(s => s.number === selectedShift)?.label || `Shift ${selectedShift}`
   const today = format(new Date(), 'yyyy-MM-dd')
+
+  // Reset to current shift when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedShift(autoShift)
+    }
+  }, [isOpen, autoShift])
 
   useEffect(() => {
     if (isOpen && cashier?.id) {
       fetchFuelTypes()
       fetchData()
     }
-  }, [isOpen, selectedBranchId, cashier?.id])
+  }, [isOpen, selectedBranchId, cashier?.id, selectedShift])
 
   const fetchData = async () => {
     if (!selectedBranchId || !cashier?.id) return
@@ -50,7 +60,7 @@ export default function CashierAccountability({ isOpen, onClose }) {
       console.log('CashierAccountability - fetching data for:', { 
         cashierId: cashier.id, 
         branchId: selectedBranchId,
-        shift: currentShift,
+        shift: selectedShift,
         date: today,
         start,
         end
@@ -63,13 +73,13 @@ export default function CashierAccountability({ isOpen, onClose }) {
       // Fetch pumps with current readings
       await fetchPumps(selectedBranchId)
 
-      // Fetch shift snapshots for current shift
+      // Fetch shift snapshots for selected shift
       const { data: snapshots } = await supabase
         .from('shift_pump_snapshots')
         .select('*, pumps(pump_name, pump_number, fuel_type, category, price_per_liter)')
         .eq('branch_id', selectedBranchId)
         .eq('shift_date', today)
-        .eq('shift_number', currentShift)
+        .eq('shift_number', selectedShift)
 
       // Fetch cash sales for today for this cashier
       const { data: sales, error: salesError } = await supabase
@@ -122,13 +132,13 @@ export default function CashierAccountability({ isOpen, onClose }) {
         .gte('created_at', start)
         .lte('created_at', end)
 
-      // Fetch calibrations for current shift only
+      // Fetch calibrations for selected shift only
       const { data: cals } = await supabase
         .from('pump_calibrations')
         .select('*, pumps(pump_name, fuel_type)')
         .eq('branch_id', selectedBranchId)
         .eq('shift_date', today)
-        .eq('shift_number', currentShift)
+        .eq('shift_number', selectedShift)
 
       setCashSales(sales || [])
       setPurchaseOrders(pos || [])
@@ -137,12 +147,11 @@ export default function CashierAccountability({ isOpen, onClose }) {
       setWithdrawals(withs || [])
       setCalibrations(cals || [])
 
-      // Group pump readings by fuel type
-      // Use shift snapshots if available, otherwise fallback to pumps table
+      // Group pump readings by fuel type using ONLY shift snapshots
+      // Do NOT fallback to pumps table - that shows cumulative data which is wrong
       const grouped = {}
-      const useSnapshots = snapshots && snapshots.length > 0
 
-      if (useSnapshots) {
+      if (snapshots && snapshots.length > 0) {
         // Use shift snapshots for per-shift data
         snapshots.forEach(snapshot => {
           const fuelType = snapshot.pumps?.fuel_type
@@ -170,27 +179,9 @@ export default function CashierAccountability({ isOpen, onClose }) {
           grouped[key].total_current += endingReading
           grouped[key].total_liters += litersDispensed
         })
-      } else {
-        // Fallback to pumps table (cumulative data)
-        pumps.forEach(pump => {
-          const key = `${pump.fuel_type}-${pump.category || 'regular'}`
-          if (!grouped[key]) {
-            grouped[key] = {
-              fuel_type: pump.fuel_type,
-              category: pump.category || 'regular',
-              pumps: [],
-              total_initial: 0,
-              total_current: 0,
-              total_liters: 0,
-              price_per_liter: pump.price_per_liter,
-            }
-          }
-          grouped[key].pumps.push(pump)
-          grouped[key].total_initial += parseFloat(pump.initial_reading || 0)
-          grouped[key].total_current += parseFloat(pump.current_reading || 0)
-          grouped[key].total_liters += parseFloat(pump.current_reading || 0) - parseFloat(pump.initial_reading || 0)
-        })
       }
+      // No fallback - if no snapshots exist, show empty/zero data
+      // This prevents showing misleading cumulative totals
       setPumpReadings(Object.values(grouped))
 
     } catch (error) {
@@ -242,6 +233,22 @@ export default function CashierAccountability({ isOpen, onClose }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Shift selector */}
+            <div className="flex bg-white/20 rounded-lg overflow-hidden">
+              {shifts.map(shift => (
+                <button
+                  key={shift.number}
+                  onClick={() => setSelectedShift(shift.number)}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                    selectedShift === shift.number
+                      ? 'bg-white text-emerald-700'
+                      : 'text-white hover:bg-white/30'
+                  }`}
+                >
+                  {shift.number === 1 ? '1st' : shift.number === 2 ? '2nd' : '3rd'}
+                </button>
+              ))}
+            </div>
             <button
               onClick={fetchData}
               disabled={loading}
