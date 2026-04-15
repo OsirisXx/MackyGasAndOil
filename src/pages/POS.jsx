@@ -139,37 +139,42 @@ export default function POS() {
     if (!cashier) return
     setLoadingData(true)
     try {
-      const today = format(new Date(), 'yyyy-MM-dd')
+      // Use local midnight → local 23:59:59 converted to UTC ISO so PH time (UTC+8) works correctly
+      const now = new Date()
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+      const startISO = startOfDay.toISOString()
+      const endISO = endOfDay.toISOString()
       const [salesRes, poRes, prodRes, depositRes, withdrawalRes] = await Promise.all([
         supabase.from('cash_sales')
           .select('*, fuel_types(short_code, name), cashiers(full_name)')
           .eq('cashier_id', cashier.id)
-          .gte('created_at', today + 'T00:00:00')
-          .lte('created_at', today + 'T23:59:59')
+          .gte('created_at', startISO)
+          .lte('created_at', endISO)
           .order('created_at', { ascending: false }),
         supabase.from('purchase_orders')
           .select('*, fuel_types(short_code, name), cashiers(full_name)')
           .eq('cashier_id', cashier.id)
-          .gte('created_at', today + 'T00:00:00')
-          .lte('created_at', today + 'T23:59:59')
+          .gte('created_at', startISO)
+          .lte('created_at', endISO)
           .order('created_at', { ascending: false }),
         supabase.from('product_sales')
           .select('*')
           .eq('cashier_id', cashier.id)
-          .gte('created_at', today + 'T00:00:00')
-          .lte('created_at', today + 'T23:59:59')
+          .gte('created_at', startISO)
+          .lte('created_at', endISO)
           .order('created_at', { ascending: false }),
         supabase.from('cash_deposits')
           .select('*, cashiers(full_name)')
           .eq('cashier_id', cashier.id)
-          .gte('deposit_date', today + 'T00:00:00')
-          .lte('deposit_date', today + 'T23:59:59')
+          .gte('deposit_date', startISO)
+          .lte('deposit_date', endISO)
           .order('deposit_date', { ascending: false }),
         supabase.from('cash_withdrawals')
           .select('*, cashiers(full_name)')
           .eq('cashier_id', cashier.id)
-          .gte('withdrawal_date', today + 'T00:00:00')
-          .lte('withdrawal_date', today + 'T23:59:59')
+          .gte('withdrawal_date', startISO)
+          .lte('withdrawal_date', endISO)
           .order('withdrawal_date', { ascending: false }),
       ])
       setTodaySales(salesRes.data || [])
