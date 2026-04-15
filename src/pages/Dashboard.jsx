@@ -46,7 +46,7 @@ export default function Dashboard() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
   const { pumps, fetchPumps } = usePumpStore()
   const { selectedBranchId, getSelectedBranch } = useBranchStore()
-  const [today] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const today = format(new Date(), 'yyyy-MM-dd')
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
     totalCashSales: 0,
@@ -84,11 +84,11 @@ export default function Dashboard() {
       let productQ = supabase.from('product_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)
       if (selectedBranchId) productQ = productQ.eq('branch_id', selectedBranchId)
 
-      // Recent sales - now with pump data
-      let recentCashQ = supabase.from('cash_sales').select('*, pumps(pump_name, fuel_type, category), cashiers(full_name)').order('created_at', { ascending: false }).limit(5)
+      // Recent sales - today only, most recent first
+      let recentCashQ = supabase.from('cash_sales').select('*, pumps(pump_name, fuel_type, category), cashiers(full_name)').gte('created_at', startOfDay).lte('created_at', endOfDay).order('created_at', { ascending: false }).limit(5)
       if (selectedBranchId) recentCashQ = recentCashQ.eq('branch_id', selectedBranchId)
 
-      let recentProdQ = supabase.from('product_sales').select('*').order('created_at', { ascending: false }).limit(5)
+      let recentProdQ = supabase.from('product_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay).order('created_at', { ascending: false }).limit(5)
       if (selectedBranchId) recentProdQ = recentProdQ.eq('branch_id', selectedBranchId)
 
       const [{ data: cashSales }, { data: purchaseOrders }, { count: activeCashiers }, { data: productSales }, { data: recentCash }, { data: recentProd }] = await Promise.all([salesQ, poQ, cashierQ, productQ, recentCashQ, recentProdQ])
@@ -133,6 +133,16 @@ export default function Dashboard() {
       fetchPumps(selectedBranchId)
     }
     fetchDashboardData()
+
+    // Realtime: refresh dashboard whenever a new sale or PO is inserted
+    const channel = supabase
+      .channel('dashboard-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'cash_sales' }, fetchDashboardData)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'purchase_orders' }, fetchDashboardData)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'product_sales' }, fetchDashboardData)
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [selectedBranchId])
 
   return (
