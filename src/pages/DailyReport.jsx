@@ -64,8 +64,9 @@ export default function DailyReport() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const start = reportDate + 'T00:00:00'
-      const end = reportDate + 'T23:59:59'
+      const [y, m, d] = reportDate.split('-').map(Number)
+      const start = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString()
+      const end = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString()
 
       let salesQ = supabase.from('cash_sales').select('*, fuel_types(short_code, name), cashiers(full_name)').gte('created_at', start).lte('created_at', end).order('created_at', { ascending: true })
       if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)

@@ -68,8 +68,8 @@ export const useAuditStore = create((set, get) => ({
       if (entityType) query = query.eq('entity_type', entityType)
       if (action) query = query.eq('action', action)
       if (branchId) query = query.eq('branch_id', branchId)
-      if (startDate) query = query.gte('created_at', startDate + 'T00:00:00')
-      if (endDate) query = query.lte('created_at', endDate + 'T23:59:59')
+      if (startDate) { const [y,m,d] = startDate.split('-').map(Number); query = query.gte('created_at', new Date(y,m-1,d,0,0,0,0).toISOString()) }
+      if (endDate) { const [y,m,d] = endDate.split('-').map(Number); query = query.lte('created_at', new Date(y,m-1,d,23,59,59,999).toISOString()) }
 
       const { data, count, error } = await query
       if (error) throw error

@@ -26,8 +26,8 @@ export default function PurchaseOrders() {
       let query = supabase
         .from('purchase_orders')
         .select('*, fuel_types(short_code, name), cashiers(full_name), customers(name, company)')
-        .gte('created_at', startDate + 'T00:00:00')
-        .lte('created_at', endDate + 'T23:59:59')
+        .gte('created_at', (() => { const [y,m,d] = startDate.split('-').map(Number); return new Date(y,m-1,d,0,0,0,0).toISOString() })())
+        .lte('created_at', (() => { const [y,m,d] = endDate.split('-').map(Number); return new Date(y,m-1,d,23,59,59,999).toISOString() })())
         .order('created_at', { ascending: false })
 
       if (statusFilter !== 'all') query = query.eq('status', statusFilter)

@@ -64,8 +64,9 @@ export default function Dashboard() {
     console.log('[Dashboard] fetchDashboardData started')
     setLoading(true)
     try {
-      const startOfDay = today + 'T00:00:00'
-      const endOfDay = today + 'T23:59:59'
+      const [ty, tm, td] = today.split('-').map(Number)
+      const startOfDay = new Date(ty, tm - 1, td, 0, 0, 0, 0).toISOString()
+      const endOfDay = new Date(ty, tm - 1, td, 23, 59, 59, 999).toISOString()
 
       // Fetch today's cash sales
       let salesQ = supabase.from('cash_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay)

@@ -24,8 +24,8 @@ export default function ChargeInvoices() {
       const { data, error } = await supabase
         .from('charge_invoices')
         .select('*, daily_reports(report_date, shifts(shift_number))')
-        .gte('created_at', startDate + 'T00:00:00')
-        .lte('created_at', endDate + 'T23:59:59')
+        .gte('created_at', (() => { const [y,m,d] = startDate.split('-').map(Number); return new Date(y,m-1,d,0,0,0,0).toISOString() })())
+        .lte('created_at', (() => { const [y,m,d] = endDate.split('-').map(Number); return new Date(y,m-1,d,23,59,59,999).toISOString() })())
         .order('created_at', { ascending: false })
       if (!error) setInvoices(data || [])
     } catch (err) {

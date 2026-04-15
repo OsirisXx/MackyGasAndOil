@@ -50,8 +50,8 @@ export default function CashDeposits() {
 
       if (selectedDate) {
         query = query
-          .gte('deposit_date', selectedDate + 'T00:00:00')
-          .lte('deposit_date', selectedDate + 'T23:59:59')
+          .gte('deposit_date', (() => { const [y,m,d] = selectedDate.split('-').map(Number); return new Date(y,m-1,d,0,0,0,0).toISOString() })())
+          .lte('deposit_date', (() => { const [y,m,d] = selectedDate.split('-').map(Number); return new Date(y,m-1,d,23,59,59,999).toISOString() })())
       }
 
       if (selectedCashier) {
@@ -85,8 +85,8 @@ export default function CashDeposits() {
 
       if (selectedDate) {
         query = query
-          .gte('withdrawal_date', selectedDate + 'T00:00:00')
-          .lte('withdrawal_date', selectedDate + 'T23:59:59')
+          .gte('withdrawal_date', (() => { const [y,m,d] = selectedDate.split('-').map(Number); return new Date(y,m-1,d,0,0,0,0).toISOString() })())
+          .lte('withdrawal_date', (() => { const [y,m,d] = selectedDate.split('-').map(Number); return new Date(y,m-1,d,23,59,59,999).toISOString() })())
       }
 
       if (selectedCashier) {

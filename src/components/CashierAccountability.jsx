@@ -54,8 +54,9 @@ export default function CashierAccountability({ isOpen, onClose }) {
 
     try {
       // Use same date format as POS page
-      const start = today + 'T00:00:00'
-      const end = today + 'T23:59:59'
+      const [ty, tm, td] = today.split('-').map(Number)
+      const start = new Date(ty, tm - 1, td, 0, 0, 0, 0).toISOString()
+      const end = new Date(ty, tm - 1, td, 23, 59, 59, 999).toISOString()
 
       console.log('CashierAccountability - fetching data for:', { 
         cashierId: cashier.id, 

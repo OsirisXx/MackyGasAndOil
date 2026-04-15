@@ -41,8 +41,9 @@ export default function AccountabilityReport() {
   const fetchAllData = async () => {
     setLoading(true)
     try {
-      const start = reportDate + 'T00:00:00'
-      const end = reportDate + 'T23:59:59'
+      const [y, m, d] = reportDate.split('-').map(Number)
+      const start = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString()
+      const end = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString()
 
       // Ensure shift snapshots exist and are updated
       if (selectedBranchId) {
