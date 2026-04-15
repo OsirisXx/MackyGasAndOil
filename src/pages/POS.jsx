@@ -1,16 +1,17 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useAuthStore } from '../stores/authStore'
 import { useFuelStore } from '../stores/fuelStore'
 import { useProductStore } from '../stores/productStore'
 import { usePumpStore } from '../stores/pumpStore'
 import { useBranchStore } from '../stores/branchStore'
+import { useCustomerStore } from '../stores/customerStore'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 import { getCurrentShift, getShiftsForBranch } from '../utils/shiftConfig'
 import { ensureCurrentShiftSnapshots } from '../services/shiftService'
 import {
   Fuel, DollarSign, Plus, ShoppingCart, FileText,
-  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi, Vault, Truck, Gauge, Beaker
+  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi, Vault, Truck, Gauge, Beaker, ChevronDown
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
@@ -24,6 +25,7 @@ export default function POS() {
   const { products, fetchProducts } = useProductStore()
   const { pumps, fetchPumps } = usePumpStore()
   const { selectedBranchId, setSelectedBranch } = useBranchStore()
+  const { customers, fetchCustomers } = useCustomerStore()
   const { isConnected, isOnline, isSupabaseConnected } = useConnectionStatus()
 
   // Transaction form
@@ -43,6 +45,9 @@ export default function POS() {
   const [poPlate, setPoPlate] = useState('')
   const [poNotes, setPoNotes] = useState('')
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false)
+  const [poCustomerMode, setPoCustomerMode] = useState('select') // 'type' or 'select'
+  const [showPoDropdown, setShowPoDropdown] = useState(false)
+  const poDropdownRef = useRef(null)
 
   // Today's transactions
   const [todaySales, setTodaySales] = useState([])
@@ -87,6 +92,7 @@ export default function POS() {
   useEffect(() => {
     fetchFuelTypes()
     fetchProducts()
+    fetchCustomers()
     fetchAllCustomers()
     if (cashier) {
       fetchTodayData()
@@ -838,27 +844,103 @@ export default function POS() {
                 <form onSubmit={handleCreatePO} className="space-y-3">
                   <div className="relative">
                     <label className="block text-xs font-medium text-gray-500 mb-1">Customer Name *</label>
-                    <input type="text" value={poCustomer} 
-                      onChange={e => { setPoCustomer(e.target.value); setShowCustomerSuggestions(true) }}
-                      onFocus={() => setShowCustomerSuggestions(true)}
-                      onBlur={() => setTimeout(() => setShowCustomerSuggestions(false), 200)}
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500"
-                      placeholder="Who took the gas?" required autoComplete="off" />
-                    
-                    {/* Customer Suggestions Dropdown */}
-                    {showCustomerSuggestions && customerSuggestions.length > 0 && (
-                      <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                        {customerSuggestions.map((c, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => handleSelectCustomer(c)}
-                            className="w-full px-3 py-2 text-left hover:bg-amber-50 border-b border-gray-100 last:border-0"
-                          >
-                            <p className="text-sm font-medium text-gray-800">{c.name}</p>
-                            {c.plate && <p className="text-xs text-gray-400">Plate: {c.plate}</p>}
-                          </button>
-                        ))}
+                    <div className="flex gap-1 mb-1.5">
+                      <button type="button"
+                        onClick={() => { setPoCustomerMode('select'); setPoCustomer('') }}
+                        className={`flex-1 text-xs py-1 rounded-md font-medium transition-colors ${
+                          poCustomerMode === 'select'
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        }`}>
+                        Choose from list
+                      </button>
+                      <button type="button"
+                        onClick={() => { setPoCustomerMode('type'); setPoCustomer(''); setShowPoDropdown(false) }}
+                        className={`flex-1 text-xs py-1 rounded-md font-medium transition-colors ${
+                          poCustomerMode === 'type'
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        }`}>
+                        Type new name
+                      </button>
+                    </div>
+
+                    {poCustomerMode === 'select' ? (
+                      <div
+                        className="relative"
+                        ref={poDropdownRef}
+                        onBlur={e => {
+                          if (!poDropdownRef.current?.contains(e.relatedTarget)) {
+                            setShowPoDropdown(false)
+                          }
+                        }}
+                      >
+                        <button type="button"
+                          onClick={() => setShowPoDropdown(v => !v)}
+                          className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 flex items-center justify-between bg-white text-left">
+                          <span className={poCustomer ? 'text-gray-800' : 'text-gray-400'}>
+                            {poCustomer || 'Select customer...'}
+                          </span>
+                          <ChevronDown size={16} className="text-gray-400 shrink-0" />
+                        </button>
+                        {showPoDropdown && (
+                          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg">
+                            <div className="p-2 border-b border-gray-100">
+                              <input
+                                type="text"
+                                autoFocus
+                                placeholder="Search name..."
+                                className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-amber-500"
+                                onChange={e => {
+                                  const q = e.target.value.toLowerCase()
+                                  poDropdownRef.current?.querySelectorAll('[data-name]').forEach(el => {
+                                    el.style.display = el.dataset.name.toLowerCase().includes(q) ? '' : 'none'
+                                  })
+                                }}
+                              />
+                            </div>
+                            <div className="max-h-48 overflow-y-auto">
+                              {allCustomers.length === 0 ? (
+                                <p className="px-3 py-3 text-xs text-gray-400 text-center">No past customers found</p>
+                              ) : (
+                                allCustomers.map((c, i) => (
+                                  <button key={i} type="button"
+                                    data-name={c.name}
+                                    onMouseDown={() => {
+                                      setPoCustomer(c.name)
+                                      if (c.plate && !poPlate) setPoPlate(c.plate)
+                                      setShowPoDropdown(false)
+                                    }}
+                                    className="w-full px-3 py-2 text-left hover:bg-amber-50 border-b border-gray-100 last:border-0">
+                                    <p className="text-sm font-medium text-gray-800">{c.name}</p>
+                                    {c.plate && <p className="text-xs text-gray-400">Plate: {c.plate}</p>}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <input type="text" value={poCustomer}
+                          onChange={e => { setPoCustomer(e.target.value); setShowCustomerSuggestions(true) }}
+                          onFocus={() => setShowCustomerSuggestions(true)}
+                          onBlur={() => setTimeout(() => setShowCustomerSuggestions(false), 200)}
+                          className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                          placeholder="Type customer name..." required={poCustomerMode === 'type'} autoComplete="off" />
+                        {showCustomerSuggestions && customerSuggestions.length > 0 && (
+                          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            {customerSuggestions.map((c, i) => (
+                              <button key={i} type="button"
+                                onClick={() => handleSelectCustomer(c)}
+                                className="w-full px-3 py-2 text-left hover:bg-amber-50 border-b border-gray-100 last:border-0">
+                                <p className="text-sm font-medium text-gray-800">{c.name}</p>
+                                {c.plate && <p className="text-xs text-gray-400">Plate: {c.plate}</p>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
