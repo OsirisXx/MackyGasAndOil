@@ -85,7 +85,7 @@ export default function Dashboard() {
       if (selectedBranchId) productQ = productQ.eq('branch_id', selectedBranchId)
 
       // Recent sales - today only, most recent first
-      let recentCashQ = supabase.from('cash_sales').select('*, pumps(pump_name, fuel_type, category), cashiers(full_name)').gte('created_at', startOfDay).lte('created_at', endOfDay).order('created_at', { ascending: false }).limit(5)
+      let recentCashQ = supabase.from('cash_sales').select('*, fuel_types(short_code, name), cashiers(full_name)').gte('created_at', startOfDay).lte('created_at', endOfDay).order('created_at', { ascending: false }).limit(5)
       if (selectedBranchId) recentCashQ = recentCashQ.eq('branch_id', selectedBranchId)
 
       let recentProdQ = supabase.from('product_sales').select('*').gte('created_at', startOfDay).lte('created_at', endOfDay).order('created_at', { ascending: false }).limit(5)
@@ -119,7 +119,6 @@ export default function Dashboard() {
     } catch (err) {
       console.error('[Dashboard] fetch error:', err)
     } finally {
-      console.log('[Dashboard] fetchDashboardData completed')
       setLoading(false)
     }
   }
@@ -230,16 +229,11 @@ export default function Dashboard() {
                       </span>
                     ) : (
                       <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium mr-2">
-                        {s.pumps?.pump_name || 'FUEL'}
-                      </span>
-                    )}
-                    {s.pumps?.category === 'discounted' && (
-                      <span className="text-xs bg-amber-50 text-amber-600 px-1 py-0.5 rounded font-medium mr-1">
-                        DISC
+                        {s.fuel_types?.short_code || 'FUEL'}
                       </span>
                     )}
                     <span className="text-xs text-gray-400">
-                      {s.cashiers?.full_name || s.cashier_name || 'Unknown'} • {format(new Date(s.created_at), 'h:mm a')}
+                      {s.cashiers?.full_name || s.cashier_name || 'Unknown'} • {format(new Date(s.created_at), 'h:mm a')} • {s.payment_method}
                     </span>
                   </div>
                   <span className="font-bold text-gray-800">
