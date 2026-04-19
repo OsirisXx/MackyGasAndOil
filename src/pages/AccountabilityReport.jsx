@@ -45,8 +45,10 @@ export default function AccountabilityReport() {
       const start = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString()
       const end = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString()
 
-      // Ensure shift snapshots exist and are updated
-      if (selectedBranchId) {
+      // Only ensure/update snapshots for TODAY's current shift
+      // For past dates, snapshots should already exist from when those shifts were active
+      const today = format(new Date(), 'yyyy-MM-dd')
+      if (selectedBranchId && reportDate === today) {
         await ensureCurrentShiftSnapshots(selectedBranchId, selectedBranch?.name)
         await updateShiftReadings(selectedBranchId)
       }
@@ -92,81 +94,54 @@ export default function AccountabilityReport() {
       console.log('AccountabilityReport - snapshotsData:', snapshotsData)
       console.log('AccountabilityReport - pumpsData:', pumpsData)
 
-      // Aggregate pump readings by fuel type AND category (regular/discounted)
-      // Use shift snapshots if available, fallback to pumps table
-      const aggregatedReadings = {}
-      const useSnapshots = snapshotsData && snapshotsData.length > 0
-
-      if (useSnapshots) {
-        // Use shift snapshots for per-shift data
-        snapshotsData.forEach(snapshot => {
-          const fuelType = snapshot.pumps?.fuel_type
-          const category = snapshot.pumps?.category || 'regular'
-          if (!fuelType) return
-
-          const key = `${fuelType}-${category}`
-
+      // Build per-pump readings (one column per nozzle)
+      // Start with snapshots, then fill in any pumps that have no snapshot for this shift
+      const snapshotPumpIds = new Set((snapshotsData || []).filter(s => s.pumps).map(s => s.pump_id))
+      
+      const snapshotReadings = (snapshotsData || [])
+        .filter(s => s.pumps)
+        .map(snapshot => {
           const beginningReading = parseFloat(snapshot.beginning_reading || 0)
           const endingReading = parseFloat(snapshot.ending_reading || snapshot.beginning_reading || 0)
-          const litersDispensed = endingReading - beginningReading
-
-          if (!aggregatedReadings[key]) {
-            aggregatedReadings[key] = {
-              fuel_type: fuelType,
-              category: category,
-              beginning_reading: 0,
-              ending_reading: 0,
-              liters_dispensed: 0,
-              adjustment_liters: 0,
-              price_per_liter: snapshot.price_per_liter || snapshot.pumps?.price_per_liter || 0,
-            }
+          return {
+            pump_id: snapshot.pump_id,
+            pump_name: snapshot.pumps.pump_name,
+            pump_number: snapshot.pumps.pump_number,
+            fuel_type: snapshot.pumps.fuel_type,
+            category: snapshot.pumps.category || 'regular',
+            short_code: snapshot.pumps.pump_name,
+            beginning_reading: beginningReading,
+            ending_reading: endingReading,
+            liters_dispensed: endingReading - beginningReading,
+            adjustment_liters: 0,
+            price_per_liter: snapshot.price_per_liter || snapshot.pumps.price_per_liter || 0,
           }
-
-          aggregatedReadings[key].beginning_reading += beginningReading
-          aggregatedReadings[key].ending_reading += endingReading
-          aggregatedReadings[key].liters_dispensed += litersDispensed
         })
-      }
-      // No fallback - if no snapshots exist for this shift, show empty data
-      // This ensures each shift only shows its own data
 
-      // Convert to array - create entries for both regular and discounted variants
-      const readingsArray = []
-      fuelTypes.forEach(ft => {
-        // Regular variant
-        const regularKey = `${ft.name}-regular`
-        const regularAgg = aggregatedReadings[regularKey]
-        if (regularAgg) {
-          readingsArray.push({
-            fuel_type_id: ft.id,
-            fuel_type: ft.name,
-            category: 'regular',
-            short_code: ft.short_code, // e.g., "DSL"
-            beginning_reading: regularAgg.beginning_reading,
-            ending_reading: regularAgg.ending_reading,
-            liters_dispensed: regularAgg.liters_dispensed,
-            adjustment_liters: regularAgg.adjustment_liters,
-            price_per_liter: regularAgg.price_per_liter,
-          })
-        }
+      // Add pumps that have no snapshot (no sales this shift) — show with 0 liters
+      const missingPumps = (pumpsData || [])
+        .filter(p => !snapshotPumpIds.has(p.id))
+        .map(p => ({
+          pump_id: p.id,
+          pump_name: p.pump_name,
+          pump_number: p.pump_number,
+          fuel_type: p.fuel_type,
+          category: p.category || 'regular',
+          short_code: p.pump_name,
+          beginning_reading: parseFloat(p.current_reading || 0),
+          ending_reading: parseFloat(p.current_reading || 0),
+          liters_dispensed: 0,
+          adjustment_liters: 0,
+          price_per_liter: parseFloat(p.price_per_liter || 0),
+        }))
 
-        // Discounted variant
-        const discountedKey = `${ft.name}-discounted`
-        const discountedAgg = aggregatedReadings[discountedKey]
-        if (discountedAgg) {
-          readingsArray.push({
-            fuel_type_id: ft.id,
-            fuel_type: ft.name,
-            category: 'discounted',
-            short_code: `${ft.short_code}-D`, // e.g., "DSL-D"
-            beginning_reading: discountedAgg.beginning_reading,
-            ending_reading: discountedAgg.ending_reading,
-            liters_dispensed: discountedAgg.liters_dispensed,
-            adjustment_liters: discountedAgg.adjustment_liters,
-            price_per_liter: discountedAgg.price_per_liter,
-          })
-        }
-      })
+      const readingsArray = [...snapshotReadings, ...missingPumps]
+        .sort((a, b) => {
+          const numA = a.pump_number || 0
+          const numB = b.pump_number || 0
+          if (numA !== numB) return numA - numB
+          return (a.pump_name || '').localeCompare(b.pump_name || '')
+        })
 
       setFuelReadings(readingsArray)
       setCashSales(sales || [])
@@ -330,12 +305,13 @@ export default function AccountabilityReport() {
         </div>
 
         {/* Fuel Sales Table */}
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse text-xs mb-4">
           <thead>
             <tr className="bg-gray-100">
-              <th className="border border-gray-300 p-2 text-left">FUEL SALES</th>
+              <th className="border border-gray-300 p-2 text-left whitespace-nowrap">FUEL SALES</th>
               {fuelReadings.map((r, idx) => (
-                <th key={idx} className="border border-gray-300 p-2 text-center">{r.short_code}</th>
+                <th key={idx} className="border border-gray-300 p-2 text-center whitespace-nowrap text-[10px]">{r.short_code}</th>
               ))}
             </tr>
           </thead>
@@ -393,12 +369,9 @@ export default function AccountabilityReport() {
               <td className="border border-gray-300 p-2">TOTAL FUEL</td>
               {fuelReadings.map((r, idx) => {
                 const baseValue = r ? (parseFloat(r.liters_dispensed || 0) * parseFloat(r.price_per_liter || 0)) : 0
-                // Add calibration amount for this fuel type
-                const fuelCalibrations = calibrations.filter(c => 
-                  c.pumps?.fuel_type === r?.fuel_type && 
-                  (c.pumps?.category || 'regular') === (r?.category || 'regular')
-                )
-                const calibrationValue = fuelCalibrations.reduce((s, c) => s + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
+                // Add calibration amount for this specific pump
+                const pumpCalibrations = calibrations.filter(c => c.pumps?.pump_name === r?.pump_name)
+                const calibrationValue = pumpCalibrations.reduce((s, c) => s + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
                 const totalValue = baseValue + calibrationValue
                 return <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
                   {totalValue > 0 ? totalValue.toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '—'}
@@ -407,6 +380,7 @@ export default function AccountabilityReport() {
             </tr>
           </tbody>
         </table>
+        </div>
 
         {/* Total Fuel Summary */}
         <div className="flex justify-end mb-4">
