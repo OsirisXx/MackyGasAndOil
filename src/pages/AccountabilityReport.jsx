@@ -30,6 +30,7 @@ export default function AccountabilityReport() {
   const [expenses, setExpenses] = useState([])
   const [purchases, setPurchases] = useState([])
   const [productSales, setProductSales] = useState({ oil_lubes: 0, accessories: 0, services: 0, miscellaneous: 0 })
+  const [fuelDeliveries, setFuelDeliveries] = useState([])
 
   useEffect(() => { fetchFuelTypes() }, [])
   useEffect(() => { 
@@ -89,7 +90,11 @@ export default function AccountabilityReport() {
       let calQ = supabase.from('pump_calibrations').select('*, pumps(pump_name, fuel_type)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) calQ = calQ.eq('branch_id', selectedBranchId)
 
-      const [{ data: snapshotsData }, { data: pumpsData }, { data: sales }, { data: ci }, { data: dep }, { data: chk }, { data: exp }, { data: pur }, { data: cal }] = await Promise.all([snapshotsQ, pumpsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ, calQ])
+      // Fetch fuel deliveries for this date (to account for tank dipping)
+      let delQ = supabase.from('fuel_deliveries').select('*, fuel_tanks(tank_name, fuel_type_id, fuel_types(name, short_code))').eq('delivery_date', reportDate)
+      if (selectedBranchId) delQ = delQ.eq('branch_id', selectedBranchId)
+
+      const [{ data: snapshotsData }, { data: pumpsData }, { data: sales }, { data: ci }, { data: dep }, { data: chk }, { data: exp }, { data: pur }, { data: cal }, { data: fuelDeliveries }] = await Promise.all([snapshotsQ, pumpsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ, calQ, delQ])
 
       console.log('AccountabilityReport - snapshotsData:', snapshotsData)
       console.log('AccountabilityReport - pumpsData:', pumpsData)
@@ -144,6 +149,7 @@ export default function AccountabilityReport() {
         })
 
       setFuelReadings(readingsArray)
+      setFuelDeliveries(fuelDeliveries || [])
       setCashSales(sales || [])
       setChargeInvoices(ci || [])
       setCalibrations(cal || [])
@@ -181,6 +187,28 @@ export default function AccountabilityReport() {
   const totalPurchases = purchases.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
   const totalCalibrations = calibrations.reduce((s, c) => s + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
   const totalCalibrationLiters = calibrations.reduce((s, c) => s + parseFloat(c.liters || 0), 0)
+
+  // Per-product summary (group all nozzles by fuel type)
+  const productSummary = useMemo(() => {
+    const summary = {}
+    fuelReadings.forEach(r => {
+      const ft = r.fuel_type
+      if (!summary[ft]) {
+        summary[ft] = { fuel_type: ft, total_liters: 0, total_amount: 0, price_per_liter: parseFloat(r.price_per_liter || 0) }
+      }
+      summary[ft].total_liters += parseFloat(r.liters_dispensed || 0)
+      summary[ft].total_amount += parseFloat(r.liters_dispensed || 0) * parseFloat(r.price_per_liter || 0)
+    })
+    // Add delivery liters per product
+    fuelDeliveries.forEach(d => {
+      const ftName = d.fuel_tanks?.fuel_types?.name
+      if (ftName && summary[ftName]) {
+        if (!summary[ftName].delivery_liters) summary[ftName].delivery_liters = 0
+        summary[ftName].delivery_liters += parseFloat(d.actual_received || (d.closing_dip_reading - d.opening_dip_reading) || 0)
+      }
+    })
+    return Object.values(summary)
+  }, [fuelReadings, fuelDeliveries])
 
   // Total fuel includes calibration to show accurate pump reading
   const totalFuelSales = baseFuelSales + totalCalibrations
@@ -389,6 +417,59 @@ export default function AccountabilityReport() {
             <span className="font-mono font-bold">Php {totalFuelSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
           </div>
         </div>
+
+        {/* Tank Dipping / Per-Product Summary */}
+        {productSummary.length > 0 && (
+          <div className="mb-4">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="bg-blue-50">
+                  <th className="border border-gray-300 p-2 text-left">PRODUCT SUMMARY (TANK DIPPING)</th>
+                  {productSummary.map((ps, idx) => (
+                    <th key={idx} className="border border-gray-300 p-2 text-center">{ps.fuel_type}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="border border-gray-300 p-2 font-medium">Total Liters Sold (All Nozzles)</td>
+                  {productSummary.map((ps, idx) => (
+                    <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
+                      {ps.total_liters.toLocaleString('en-PH', { minimumFractionDigits: 3 })}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="border border-gray-300 p-2 font-medium">Fuel Delivery Received</td>
+                  {productSummary.map((ps, idx) => (
+                    <td key={idx} className="border border-gray-300 p-2 text-right font-mono text-green-600">
+                      {ps.delivery_liters ? `+${ps.delivery_liters.toLocaleString('en-PH', { minimumFractionDigits: 3 })}` : '—'}
+                    </td>
+                  ))}
+                </tr>
+                <tr className="bg-blue-50 font-bold">
+                  <td className="border border-gray-300 p-2">Net Tank Consumption</td>
+                  {productSummary.map((ps, idx) => {
+                    const net = ps.total_liters - (ps.delivery_liters || 0)
+                    return (
+                      <td key={idx} className="border border-gray-300 p-2 text-right font-mono">
+                        {net.toLocaleString('en-PH', { minimumFractionDigits: 3 })}
+                      </td>
+                    )
+                  })}
+                </tr>
+                <tr>
+                  <td className="border border-gray-300 p-2 font-medium">Total Amount</td>
+                  {productSummary.map((ps, idx) => (
+                    <td key={idx} className="border border-gray-300 p-2 text-right font-mono font-bold">
+                      ₱{ps.total_amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Other Sales */}
         <div className="grid grid-cols-2 gap-4 mb-4">
