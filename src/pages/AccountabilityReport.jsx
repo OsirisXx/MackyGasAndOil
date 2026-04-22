@@ -69,14 +69,19 @@ export default function AccountabilityReport() {
         .eq('is_active', true)
       if (selectedBranchId) pumpsQ = pumpsQ.eq('branch_id', selectedBranchId)
 
-      let salesQ = supabase.from('cash_sales').select('*').gte('created_at', start).lte('created_at', end)
+      let salesQ = supabase.from('cash_sales').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
 
-      let ciQ = supabase.from('purchase_orders').select('*, fuel_types(short_code), cashiers(full_name)').gte('created_at', start).lte('created_at', end)
+      let ciQ = supabase.from('purchase_orders').select('*, fuel_types(short_code), cashiers(full_name)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) ciQ = ciQ.eq('branch_id', selectedBranchId)
 
-      let depQ = supabase.from('deposits').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      // Vault deposits from cash_deposits table (per shift)
+      let depQ = supabase.from('cash_deposits').select('*, cashiers(full_name)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) depQ = depQ.eq('branch_id', selectedBranchId)
+
+      // Vault withdrawals
+      let withQ = supabase.from('cash_withdrawals').select('*, cashiers(full_name)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      if (selectedBranchId) withQ = withQ.eq('branch_id', selectedBranchId)
 
       let chkQ = supabase.from('checks').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) chkQ = chkQ.eq('branch_id', selectedBranchId)
@@ -94,7 +99,7 @@ export default function AccountabilityReport() {
       let delQ = supabase.from('fuel_deliveries').select('*, fuel_tanks(tank_name, fuel_type_id, fuel_types(name, short_code))').eq('delivery_date', reportDate)
       if (selectedBranchId) delQ = delQ.eq('branch_id', selectedBranchId)
 
-      const [{ data: snapshotsData }, { data: pumpsData }, { data: sales }, { data: ci }, { data: dep }, { data: chk }, { data: exp }, { data: pur }, { data: cal }, { data: fuelDeliveries }] = await Promise.all([snapshotsQ, pumpsQ, salesQ, ciQ, depQ, chkQ, expQ, purQ, calQ, delQ])
+      const [{ data: snapshotsData }, { data: pumpsData }, { data: sales }, { data: ci }, { data: dep }, { data: withdrawalsData }, { data: chk }, { data: exp }, { data: pur }, { data: cal }, { data: fuelDeliveries }] = await Promise.all([snapshotsQ, pumpsQ, salesQ, ciQ, depQ, withQ, chkQ, expQ, purQ, calQ, delQ])
 
       console.log('AccountabilityReport - snapshotsData:', snapshotsData)
       console.log('AccountabilityReport - pumpsData:', pumpsData)
@@ -180,8 +185,8 @@ export default function AccountabilityReport() {
   const totalMiscellaneous = productSales.miscellaneous
   const totalChargeInvoices = chargeInvoices.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalDeposits = deposits.reduce((s, d) => s + parseFloat(d.amount || 0), 0)
-  const totalCashDeposit = deposits.filter(d => d.payment_method === 'cash').reduce((s, d) => s + parseFloat(d.amount || 0), 0)
-  const totalGcash = deposits.filter(d => d.payment_method === 'gcash').reduce((s, d) => s + parseFloat(d.amount || 0), 0)
+  const totalCashDeposit = totalDeposits
+  const totalGcash = 0
   const totalChecks = checks.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalExpenses = expenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0)
   const totalPurchases = purchases.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
@@ -511,40 +516,36 @@ export default function AccountabilityReport() {
           </div>
         </div>
 
-        {/* Deposits */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <table className="w-full border-collapse text-xs">
-              <tbody>
-                {[1,2,3,4,5,6,7].map(n => {
-                  const dep = deposits.find(d => d.deposit_number === n)
-                  return (
-                    <tr key={n}>
-                      <td className="border border-gray-300 p-2 font-medium w-24">DEPOSIT {n}</td>
-                      <td className="border border-gray-300 p-2 text-right font-mono w-24">{dep ? parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : ''}</td>
-                      <td className="border border-gray-300 p-2 text-xs">{dep?.payment_method === 'gcash' ? 'G cash' : dep?.payment_method || ''}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div>
-            <table className="w-full border-collapse text-xs">
-              <tbody>
-                {[8,9,10,11,12,13,14].map(n => {
-                  const dep = deposits.find(d => d.deposit_number === n)
-                  return (
-                    <tr key={n}>
-                      <td className="border border-gray-300 p-2 font-medium w-24">DEPOSIT {n}</td>
-                      <td className="border border-gray-300 p-2 text-right font-mono w-24">{dep ? parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : ''}</td>
-                      <td className="border border-gray-300 p-2 text-xs">{dep?.payment_method === 'gcash' ? 'G cash' : dep?.payment_method || ''}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+        {/* Vault Deposits */}
+        <div className="mb-4">
+          <p className="font-bold text-sm mb-2">VAULT DEPOSITS</p>
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 p-2 text-left">#</th>
+                <th className="border border-gray-300 p-2 text-left">CASHIER</th>
+                <th className="border border-gray-300 p-2 text-right">AMOUNT</th>
+                <th className="border border-gray-300 p-2 text-left">NOTES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deposits.length === 0 ? (
+                <tr><td colSpan={4} className="border border-gray-300 p-2 text-center text-gray-400">No vault deposits this shift</td></tr>
+              ) : deposits.map((dep, idx) => (
+                <tr key={dep.id}>
+                  <td className="border border-gray-300 p-2">{idx + 1}</td>
+                  <td className="border border-gray-300 p-2">{dep.cashiers?.full_name || '—'}</td>
+                  <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td className="border border-gray-300 p-2 text-xs">{dep.notes || ''}</td>
+                </tr>
+              ))}
+              <tr className="bg-gray-50 font-bold">
+                <td colSpan={2} className="border border-gray-300 p-2 text-right">TOTAL VAULT DEPOSITS</td>
+                <td className="border border-gray-300 p-2 text-right font-mono">{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td className="border border-gray-300 p-2"></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         {/* Deposit Totals */}

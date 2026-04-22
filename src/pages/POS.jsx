@@ -82,6 +82,18 @@ export default function POS() {
   const [calibrationLiters, setCalibrationLiters] = useState('')
   const [calibrationNotes, setCalibrationNotes] = useState('')
 
+  // Shift selection state — cashier can override auto-detected shift
+  const branchName = cashier?.branches?.name
+  const autoShift = getCurrentShift(branchName)
+  const shifts = getShiftsForBranch(branchName)
+  const [selectedShift, setSelectedShift] = useState(autoShift)
+  const currentShiftDate = format(new Date(), 'yyyy-MM-dd')
+
+  // Update auto-shift when it changes (e.g., time passes into next shift)
+  useEffect(() => {
+    setSelectedShift(getCurrentShift(branchName))
+  }, [branchName])
+
   // Set branch to cashier's branch on mount
   useEffect(() => {
     if (cashier?.branch_id && selectedBranchId !== cashier.branch_id) {
@@ -230,11 +242,13 @@ export default function POS() {
         customer_name: customerName || null,
         plate_number: plateNumber || null,
         notes: notes || null,
+        shift_date: currentShiftDate,
+        shift_number: selectedShift,
       })
       if (error) throw error
       toast.success(`₱${parseFloat(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} sale recorded!`)
-      logAudit('create', 'cash_sale', `Cash sale of ₱${parseFloat(amount).toFixed(2)} - ${selectedPump?.pump_name}`, {
-        newValues: { amount: parseFloat(amount), pump_id: pumpId, payment_method: paymentMethod },
+      logAudit('create', 'cash_sale', `Cash sale of ₱${parseFloat(amount).toFixed(2)} - ${selectedPump?.pump_name} [Shift ${selectedShift}]`, {
+        newValues: { amount: parseFloat(amount), pump_id: pumpId, payment_method: paymentMethod, shift_date: currentShiftDate, shift_number: selectedShift },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
@@ -281,11 +295,13 @@ export default function POS() {
         plate_number: poPlate || null,
         notes: poNotes || null,
         status: 'unpaid',
+        shift_date: currentShiftDate,
+        shift_number: selectedShift,
       })
       if (error) throw error
       toast.success('Purchase order created!')
-      logAudit('create', 'purchase_order', `Purchase order of ₱${parseFloat(poAmount).toFixed(2)} - ${poPump?.pump_name}`, {
-        newValues: { amount: parseFloat(poAmount), pump_id: poPumpId },
+      logAudit('create', 'purchase_order', `PO ₱${parseFloat(poAmount).toFixed(2)} - ${poPump?.pump_name} [Shift ${selectedShift}]`, {
+        newValues: { amount: parseFloat(poAmount), pump_id: poPumpId, shift_date: currentShiftDate, shift_number: selectedShift },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
@@ -321,11 +337,13 @@ export default function POS() {
         amount: parseFloat(vaultAmount),
         notes: vaultNotes || null,
         created_by: cashier.user_id,
+        shift_date: currentShiftDate,
+        shift_number: selectedShift,
       })
       if (error) throw error
       toast.success(`₱${parseFloat(vaultAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} deposited to vault!`)
-      logAudit('create', 'cash_deposit', `Cash deposit of ₱${parseFloat(vaultAmount).toFixed(2)}`, {
-        newValues: { amount: parseFloat(vaultAmount) },
+      logAudit('create', 'cash_deposit', `Vault deposit ₱${parseFloat(vaultAmount).toFixed(2)} [Shift ${selectedShift}]`, {
+        newValues: { amount: parseFloat(vaultAmount), shift_date: currentShiftDate, shift_number: selectedShift },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
@@ -362,11 +380,13 @@ export default function POS() {
         reason: withdrawalReason,
         notes: vaultNotes || null,
         created_by: cashier.user_id,
+        shift_date: currentShiftDate,
+        shift_number: selectedShift,
       })
       if (error) throw error
       toast.success(`₱${parseFloat(vaultAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} withdrawn from vault!`)
-      logAudit('create', 'cash_withdrawal', `Cash withdrawal of ₱${parseFloat(vaultAmount).toFixed(2)} - ${withdrawalReason}`, {
-        newValues: { amount: parseFloat(vaultAmount), reason: withdrawalReason },
+      logAudit('create', 'cash_withdrawal', `Vault withdrawal ₱${parseFloat(vaultAmount).toFixed(2)} - ${withdrawalReason} [Shift ${selectedShift}]`, {
+        newValues: { amount: parseFloat(vaultAmount), reason: withdrawalReason, shift_date: currentShiftDate, shift_number: selectedShift },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
@@ -417,7 +437,7 @@ export default function POS() {
         liters: litersVal,
         price_per_liter: pricePerLiter,
         shift_date: format(new Date(), 'yyyy-MM-dd'),
-        shift_number: getCurrentShift(cashier?.branches?.name),
+        shift_number: selectedShift,
         reason: 'Calibration',
         notes: calibrationNotes || null,
       })
@@ -656,8 +676,31 @@ export default function POS() {
           <div className="text-right">
             <p className="text-sm font-medium text-gray-700">{cashier?.full_name}</p>
             <p className="text-[10px] text-gray-400">
-              {format(new Date(), 'MMM d, yyyy — h:mm a')} • <span className="font-semibold text-blue-600">{getShiftsForBranch(cashier?.branches?.name)?.find(s => s.number === getCurrentShift(cashier?.branches?.name))?.label || `Shift ${getCurrentShift(cashier?.branches?.name)}`}</span>
+              {format(new Date(), 'MMM d, yyyy — h:mm a')} • <span className="font-semibold text-blue-600">{shifts?.find(s => s.number === selectedShift)?.label || `Shift ${selectedShift}`}</span>
             </p>
+          </div>
+          <div className="flex gap-1 ml-2">
+            {shifts.map(s => (
+              <button key={s.number}
+                onClick={() => {
+                  setSelectedShift(s.number)
+                  logAudit('update', 'shift_selection', `Cashier changed shift to ${s.label}`, {
+                    newValues: { shift_number: s.number, shift_label: s.label },
+                    branchId: cashier?.branch_id,
+                    branchName: cashier?.branches?.name,
+                    cashierId: cashier?.id,
+                    cashierName: cashier?.full_name,
+                  })
+                }}
+                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  selectedShift === s.number
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}>
+                {s.label}
+              </button>
+            ))}
+          </div>
           </div>
           <button onClick={handleEndShift}
             className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-sm font-medium transition-colors">
