@@ -82,17 +82,14 @@ export default function POS() {
   const [calibrationLiters, setCalibrationLiters] = useState('')
   const [calibrationNotes, setCalibrationNotes] = useState('')
 
-  // Shift selection state — cashier can override auto-detected shift
+  // Shift selection state
   const branchName = cashier?.branches?.name
   const autoShift = getCurrentShift(branchName)
   const shifts = getShiftsForBranch(branchName)
-  const [selectedShift, setSelectedShift] = useState(autoShift)
+  const [selectedShift, setSelectedShift] = useState(null) // null = not yet selected
+  const [shiftConfirmed, setShiftConfirmed] = useState(false) // gate for POS access
+  const [showChangeShift, setShowChangeShift] = useState(false)
   const currentShiftDate = format(new Date(), 'yyyy-MM-dd')
-
-  // Update auto-shift when it changes (e.g., time passes into next shift)
-  useEffect(() => {
-    setSelectedShift(getCurrentShift(branchName))
-  }, [branchName])
 
   // Set branch to cashier's branch on mount
   useEffect(() => {
@@ -627,8 +624,112 @@ export default function POS() {
     miscellaneous: 'Misc',
   }
 
+  // Shift Selection Gate — cashier must select shift before accessing POS
+  if (!shiftConfirmed || selectedShift === null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8">
+          <div className="text-center mb-6">
+            <img src="/logo.png" alt="Logo" className="w-16 h-16 mx-auto mb-3 rounded-xl object-cover" />
+            <h1 className="text-xl font-bold text-gray-800">MACKY OIL & GAS</h1>
+            <p className="text-sm text-gray-500 mt-1">POS Terminal {branchName ? `— ${branchName}` : ''}</p>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-blue-800 font-medium mb-1">Welcome, {cashier?.full_name}</p>
+            <p className="text-xs text-blue-600">Please select your shift to begin. All sales, deposits, withdrawals, and activities will be recorded and audited.</p>
+          </div>
+
+          <p className="text-sm font-semibold text-gray-700 mb-3">Select Your Shift:</p>
+          <div className="flex gap-3 mb-6">
+            {shifts.map(s => (
+              <button key={s.number}
+                onClick={() => setSelectedShift(s.number)}
+                className={`flex-1 py-4 rounded-xl text-center font-bold transition-all ${
+                  selectedShift === s.number
+                    ? 'bg-blue-600 text-white shadow-lg scale-105'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}>
+                <span className="text-lg">{s.label}</span>
+                <br />
+                <span className="text-[10px] font-normal opacity-75">{s.startTime} - {s.endTime}</span>
+              </button>
+            ))}
+          </div>
+
+          {autoShift !== selectedShift && selectedShift !== null && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+              <p className="text-xs text-amber-700 font-medium">The auto-detected shift is {shifts.find(s => s.number === autoShift)?.label}. You selected a different shift. Make sure this is correct.</p>
+            </div>
+          )}
+
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6">
+            <p className="text-xs text-red-700">Any mistakes in inputs (wrong shift, wrong amounts) can only be corrected by the admin. Please double-check before proceeding.</p>
+          </div>
+
+          <button
+            onClick={() => {
+              if (selectedShift === null) return
+              setShiftConfirmed(true)
+              logAudit('create', 'shift_start', `Cashier started ${shifts.find(s => s.number === selectedShift)?.label} shift`, {
+                newValues: { shift_number: selectedShift, shift_date: currentShiftDate, auto_detected: autoShift },
+                branchId: cashier?.branch_id,
+                branchName: cashier?.branches?.name,
+                cashierId: cashier?.id,
+                cashierName: cashier?.full_name,
+              })
+            }}
+            disabled={selectedShift === null}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm transition-colors">
+            Start {selectedShift !== null ? shifts.find(s => s.number === selectedShift)?.label + ' ' : ''}Shift
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Change Shift Confirmation Dialog */}
+      {showChangeShift && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+            <h3 className="font-bold text-gray-800 mb-2">Change Shift?</h3>
+            <p className="text-sm text-gray-600 mb-1">You are currently on {shifts.find(s => s.number === selectedShift)?.label} shift.</p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+              <p className="text-xs text-amber-700">Changing shifts will affect where your future transactions are recorded. Any transactions already made under the current shift will remain there and can only be moved by admin.</p>
+            </div>
+            <p className="text-sm font-medium text-gray-700 mb-3">Switch to:</p>
+            <div className="flex gap-2 mb-4">
+              {shifts.filter(s => s.number !== selectedShift).map(s => (
+                <button key={s.number}
+                  onClick={() => {
+                    const oldShift = selectedShift
+                    setSelectedShift(s.number)
+                    setShowChangeShift(false)
+                    logAudit('update', 'shift_change', `Cashier changed from ${shifts.find(sh => sh.number === oldShift)?.label} to ${s.label}`, {
+                      oldValues: { shift_number: oldShift },
+                      newValues: { shift_number: s.number, shift_date: currentShiftDate },
+                      branchId: cashier?.branch_id,
+                      branchName: cashier?.branches?.name,
+                      cashierId: cashier?.id,
+                      cashierName: cashier?.full_name,
+                    })
+                    toast.success(`Switched to ${s.label} shift`)
+                  }}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm transition-colors">
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowChangeShift(false)}
+              className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar */}
       <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -680,27 +781,11 @@ export default function POS() {
             </p>
           </div>
           <div className="flex gap-1 ml-2">
-            {shifts.map(s => (
-              <button key={s.number}
-                onClick={() => {
-                  setSelectedShift(s.number)
-                  logAudit('update', 'shift_selection', `Cashier changed shift to ${s.label}`, {
-                    newValues: { shift_number: s.number, shift_label: s.label },
-                    branchId: cashier?.branch_id,
-                    branchName: cashier?.branches?.name,
-                    cashierId: cashier?.id,
-                    cashierName: cashier?.full_name,
-                  })
-                }}
-                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  selectedShift === s.number
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                }`}>
-                {s.label}
-              </button>
-            ))}
-          </div>
+            <button
+              onClick={() => setShowChangeShift(true)}
+              className="px-2 py-1 rounded text-xs font-medium bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
+              Change Shift
+            </button>
           </div>
           <button onClick={handleEndShift}
             className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-sm font-medium transition-colors">

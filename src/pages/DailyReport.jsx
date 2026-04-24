@@ -4,7 +4,7 @@ import { useBranchStore } from '../stores/branchStore'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 import {
-  FileText, Fuel, RefreshCw, DollarSign, Receipt, ChevronDown, ChevronUp, Edit2, X, Save, Package, Printer, Users, Gauge
+  FileText, Fuel, RefreshCw, DollarSign, Receipt, ChevronDown, ChevronUp, Edit2, X, Save, Package, Printer, Users, Gauge, Clock
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
@@ -208,6 +208,27 @@ export default function DailyReport() {
     fetchData()
   }
 
+  // Admin: Reassign a transaction to a different shift
+  const [reassigning, setReassigning] = useState(null) // { id, table, currentShift }
+  const handleReassignShift = async (id, table, newShiftNumber) => {
+    const oldShift = reassigning?.currentShift
+    const { error } = await supabase
+      .from(table)
+      .update({ shift_number: newShiftNumber })
+      .eq('id', id)
+    
+    if (error) return toast.error(error.message)
+    toast.success(`Moved to Shift ${newShiftNumber}`)
+    logAudit('update', `${table}_shift_reassign`, `Admin reassigned ${table} record from Shift ${oldShift} to Shift ${newShiftNumber}`, {
+      entityId: id,
+      oldValues: { shift_number: oldShift },
+      newValues: { shift_number: newShiftNumber },
+      branchId: selectedBranchId,
+    })
+    setReassigning(null)
+    fetchData()
+  }
+
   const handlePrint = () => {
     const printContent = printRef.current
     const printWindow = window.open('', '_blank')
@@ -378,12 +399,26 @@ export default function DailyReport() {
                   <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-medium">
                     {s.fuel_types?.short_code || 'FUEL'}
                   </span>
+                  {s.shift_number && (
+                    <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                      S{s.shift_number}
+                    </span>
+                  )}
                   <div>
                     <p className="text-sm font-medium text-gray-700">{s.cashiers?.full_name || 'Unknown'}</p>
                     <p className="text-[10px] text-gray-400">{format(new Date(s.created_at), 'h:mm a')} • {s.payment_method}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {reassigning?.id === s.id ? (
+                    <div className="flex items-center gap-1">
+                      {[1,2,3].filter(n => n !== s.shift_number).map(n => (
+                        <button key={n} onClick={() => handleReassignShift(s.id, 'cash_sales', n)}
+                          className="px-2 py-1 text-[10px] bg-blue-600 text-white rounded font-medium">S{n}</button>
+                      ))}
+                      <button onClick={() => setReassigning(null)} className="p-1 text-gray-400 hover:bg-gray-100 rounded"><X size={12} /></button>
+                    </div>
+                  ) : null}
                   {editingSale === s.id ? (
                     <>
                       <input
@@ -399,6 +434,9 @@ export default function DailyReport() {
                   ) : (
                     <>
                       <span className="font-bold text-gray-800">₱{parseFloat(s.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                      <button onClick={() => setReassigning({ id: s.id, table: 'cash_sales', currentShift: s.shift_number })} className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded" title="Change Shift">
+                        <Clock size={14} />
+                      </button>
                       <button onClick={() => startEditSale(s)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Edit">
                         <Edit2 size={14} />
                       </button>
@@ -450,6 +488,11 @@ export default function DailyReport() {
                     p.status === 'paid' ? 'bg-green-50 text-green-600' :
                     p.status === 'unpaid' ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'
                   }`}>{p.status}</span>
+                  {p.shift_number && (
+                    <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                      S{p.shift_number}
+                    </span>
+                  )}
                   <div>
                     <p className="text-sm font-medium text-gray-700">{p.customer_name}</p>
                     <p className="text-[10px] text-gray-400">
@@ -458,6 +501,15 @@ export default function DailyReport() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {reassigning?.id === p.id ? (
+                    <div className="flex items-center gap-1">
+                      {[1,2,3].filter(n => n !== p.shift_number).map(n => (
+                        <button key={n} onClick={() => handleReassignShift(p.id, 'purchase_orders', n)}
+                          className="px-2 py-1 text-[10px] bg-blue-600 text-white rounded font-medium">S{n}</button>
+                      ))}
+                      <button onClick={() => setReassigning(null)} className="p-1 text-gray-400 hover:bg-gray-100 rounded"><X size={12} /></button>
+                    </div>
+                  ) : null}
                   {editingPO === p.id ? (
                     <>
                       <input
@@ -473,6 +525,9 @@ export default function DailyReport() {
                   ) : (
                     <>
                       <span className="font-bold text-gray-800">₱{parseFloat(p.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                      <button onClick={() => setReassigning({ id: p.id, table: 'purchase_orders', currentShift: p.shift_number })} className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded" title="Change Shift">
+                        <Clock size={14} />
+                      </button>
                       <button onClick={() => startEditPO(p)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Edit">
                         <Edit2 size={14} />
                       </button>
