@@ -46,41 +46,56 @@ export default function AccountabilityReport() {
       const start = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString()
       const end = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString()
 
-      // Only ensure/update snapshots for TODAY's current shift
-      // For past dates, snapshots should already exist from when those shifts were active
-      const today = format(new Date(), 'yyyy-MM-dd')
-      if (selectedBranchId && reportDate === today) {
-        await ensureCurrentShiftSnapshots(selectedBranchId, selectedBranch?.name)
-        await updateShiftReadings(selectedBranchId)
-      }
-
-      // Fetch shift snapshots for the selected date/shift
-      let snapshotsQ = supabase
-        .from('shift_pump_snapshots')
-        .select('*, pumps(pump_name, pump_number, fuel_type, category, price_per_liter)')
-        .eq('shift_date', reportDate)
-        .eq('shift_number', selectedShift)
-      if (selectedBranchId) snapshotsQ = snapshotsQ.eq('branch_id', selectedBranchId)
-
-      // Also fetch pumps for fallback (if no snapshots exist yet)
-      let pumpsQ = supabase
-        .from('pumps')
-        .select('*')
-        .eq('is_active', true)
+      // Fetch all pumps (has current_reading — the always-correct meter value)
+      let pumpsQ = supabase.from('pumps').select('*').eq('is_active', true)
       if (selectedBranchId) pumpsQ = pumpsQ.eq('branch_id', selectedBranchId)
 
-      let salesQ = supabase.from('cash_sales').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      // Fetch ALL sales for the entire day — we filter by shift in JS
+      let salesQ = supabase.from('cash_sales').select('*').gte('created_at', start).lte('created_at', end)
       if (selectedBranchId) salesQ = salesQ.eq('branch_id', selectedBranchId)
 
-      let ciQ = supabase.from('purchase_orders').select('*, fuel_types(short_code), cashiers(full_name)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      let ciQ = supabase.from('purchase_orders').select('*, fuel_types(short_code), cashiers(full_name)').gte('created_at', start).lte('created_at', end)
       if (selectedBranchId) ciQ = ciQ.eq('branch_id', selectedBranchId)
 
-      // Vault deposits from cash_deposits table (per shift)
-      let depQ = supabase.from('cash_deposits').select('*, cashiers(full_name)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      // Fetch ALL sales from AFTER the selected shift end until now
+      // This is needed to compute: ending_reading = current_reading - liters_after_this_shift
+      const shiftConfig = SHIFTS.find(s => s.number === selectedShift)
+      let afterShiftSalesQ = null
+      let afterShiftPOsQ = null
+      let afterShiftCalsQ = null
+      if (shiftConfig) {
+        const parseHour = (timeStr) => {
+          const [time, period] = timeStr.split(' ')
+          let [h] = time.split(':').map(Number)
+          if (period === 'PM' && h !== 12) h += 12
+          if (period === 'AM' && h === 12) h = 0
+          return h
+        }
+        const endH = parseHour(shiftConfig.endTime)
+        // Shift end timestamp
+        let shiftEndDate
+        if (endH < parseHour(shiftConfig.startTime)) {
+          // Crosses midnight — end is next day
+          shiftEndDate = new Date(y, m - 1, d + 1, endH, 0, 0, 0)
+        } else {
+          shiftEndDate = new Date(y, m - 1, d, endH, 0, 0, 0)
+        }
+        const shiftEndISO = shiftEndDate.toISOString()
+
+        afterShiftSalesQ = supabase.from('cash_sales').select('pump_id, liters').gte('created_at', shiftEndISO)
+        if (selectedBranchId) afterShiftSalesQ = afterShiftSalesQ.eq('branch_id', selectedBranchId)
+
+        afterShiftPOsQ = supabase.from('purchase_orders').select('pump_id, liters').gte('created_at', shiftEndISO)
+        if (selectedBranchId) afterShiftPOsQ = afterShiftPOsQ.eq('branch_id', selectedBranchId)
+
+        afterShiftCalsQ = supabase.from('pump_calibrations').select('pump_id, liters').gte('created_at', shiftEndISO)
+        if (selectedBranchId) afterShiftCalsQ = afterShiftCalsQ.eq('branch_id', selectedBranchId)
+      }
+
+      let depQ = supabase.from('cash_deposits').select('*, cashiers(full_name)').gte('created_at', start).lte('created_at', end)
       if (selectedBranchId) depQ = depQ.eq('branch_id', selectedBranchId)
 
-      // Vault withdrawals
-      let withQ = supabase.from('cash_withdrawals').select('*, cashiers(full_name)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      let withQ = supabase.from('cash_withdrawals').select('*, cashiers(full_name)').gte('created_at', start).lte('created_at', end)
       if (selectedBranchId) withQ = withQ.eq('branch_id', selectedBranchId)
 
       let chkQ = supabase.from('checks').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
@@ -95,62 +110,100 @@ export default function AccountabilityReport() {
       let calQ = supabase.from('pump_calibrations').select('*, pumps(pump_name, fuel_type)').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) calQ = calQ.eq('branch_id', selectedBranchId)
 
-      // Fetch fuel deliveries for this date (to account for tank dipping)
       let delQ = supabase.from('fuel_deliveries').select('*, fuel_tanks(tank_name, fuel_type_id, fuel_types(name, short_code))').eq('delivery_date', reportDate)
       if (selectedBranchId) delQ = delQ.eq('branch_id', selectedBranchId)
 
-      const [{ data: snapshotsData }, { data: pumpsData }, { data: sales }, { data: ci }, { data: dep }, { data: withdrawalsData }, { data: chk }, { data: exp }, { data: pur }, { data: cal }, { data: fuelDeliveries }] = await Promise.all([snapshotsQ, pumpsQ, salesQ, ciQ, depQ, withQ, chkQ, expQ, purQ, calQ, delQ])
+      // Build all promises
+      const promises = [pumpsQ, salesQ, ciQ, depQ, withQ, chkQ, expQ, purQ, calQ, delQ]
+      if (afterShiftSalesQ) promises.push(afterShiftSalesQ, afterShiftPOsQ, afterShiftCalsQ)
 
-      console.log('AccountabilityReport - snapshotsData:', snapshotsData)
-      console.log('AccountabilityReport - pumpsData:', pumpsData)
+      const results = await Promise.all(promises)
+      const pumpsData = results[0].data
+      const allDaySales = results[1].data
+      const allDayCi = results[2].data
+      const allDayDep = results[3].data
+      const allDayWith = results[4].data
+      const chk = results[5].data
+      const exp = results[6].data
+      const pur = results[7].data
+      const cal = results[8].data
+      const fuelDeliveries = results[9].data
+      const afterSales = results[10]?.data || []
+      const afterPOs = results[11]?.data || []
+      const afterCals = results[12]?.data || []
 
-      // Build per-pump readings (one column per nozzle)
-      // Start with snapshots, then fill in any pumps that have no snapshot for this shift
-      const snapshotPumpIds = new Set((snapshotsData || []).filter(s => s.pumps).map(s => s.pump_id))
-      
-      const snapshotReadings = (snapshotsData || [])
-        .filter(s => s.pumps)
-        .map(snapshot => {
-          const beginningReading = parseFloat(snapshot.beginning_reading || 0)
-          const endingReading = parseFloat(snapshot.ending_reading || snapshot.beginning_reading || 0)
+      // Filter day's data by shift
+      const filterByShift = (items) => {
+        if (!items || items.length === 0) return []
+        const byCol = items.filter(i => i.shift_number === selectedShift && i.shift_date === reportDate)
+        if (byCol.length > 0) return byCol
+        if (!shiftConfig) return items
+        const parseHour = (timeStr) => {
+          const [time, period] = timeStr.split(' ')
+          let [h] = time.split(':').map(Number)
+          if (period === 'PM' && h !== 12) h += 12
+          if (period === 'AM' && h === 12) h = 0
+          return h
+        }
+        const startH = parseHour(shiftConfig.startTime)
+        const endH = parseHour(shiftConfig.endTime)
+        return items.filter(item => {
+          const ts = item.created_at || item.deposit_date || item.withdrawal_date
+          if (!ts) return false
+          const hour = new Date(ts).getHours()
+          if (endH <= startH) return hour >= startH || hour < endH
+          return hour >= startH && hour < endH
+        })
+      }
+
+      const sales = filterByShift(allDaySales)
+      const ci = filterByShift(allDayCi)
+      const dep = filterByShift(allDayDep)
+      const withdrawalsData = filterByShift(allDayWith)
+
+      // Per-pump liters THIS shift (from sales)
+      const pumpLitersMap = {}
+      ;(sales || []).forEach(s => {
+        if (!s.pump_id || !s.liters) return
+        pumpLitersMap[s.pump_id] = (pumpLitersMap[s.pump_id] || 0) + parseFloat(s.liters)
+      })
+      ;(ci || []).forEach(po => {
+        if (!po.pump_id || !po.liters) return
+        pumpLitersMap[po.pump_id] = (pumpLitersMap[po.pump_id] || 0) + parseFloat(po.liters)
+      })
+
+      // Per-pump liters AFTER this shift (to compute ending reading)
+      const afterLitersMap = {}
+      ;[...afterSales, ...afterPOs, ...afterCals].forEach(s => {
+        if (!s.pump_id || !s.liters) return
+        afterLitersMap[s.pump_id] = (afterLitersMap[s.pump_id] || 0) + parseFloat(s.liters)
+      })
+
+      // Build readings: ending = current_reading - after_liters, beginning = ending - this_shift_liters
+      const readingsArray = (pumpsData || [])
+        .sort((a, b) => {
+          if ((a.pump_number || 0) !== (b.pump_number || 0)) return (a.pump_number || 0) - (b.pump_number || 0)
+          return (a.pump_name || '').localeCompare(b.pump_name || '')
+        })
+        .map(pump => {
+          const currentReading = parseFloat(pump.current_reading || 0)
+          const litersThisShift = pumpLitersMap[pump.id] || 0
+          const litersAfter = afterLitersMap[pump.id] || 0
+          const endingReading = currentReading - litersAfter
+          const beginningReading = endingReading - litersThisShift
           return {
-            pump_id: snapshot.pump_id,
-            pump_name: snapshot.pumps.pump_name,
-            pump_number: snapshot.pumps.pump_number,
-            fuel_type: snapshot.pumps.fuel_type,
-            category: snapshot.pumps.category || 'regular',
-            short_code: snapshot.pumps.pump_name,
+            pump_id: pump.id,
+            pump_name: pump.pump_name,
+            pump_number: pump.pump_number,
+            fuel_type: pump.fuel_type,
+            category: pump.category || 'regular',
+            short_code: pump.pump_name,
             beginning_reading: beginningReading,
             ending_reading: endingReading,
-            liters_dispensed: endingReading - beginningReading,
+            liters_dispensed: litersThisShift,
             adjustment_liters: 0,
-            price_per_liter: snapshot.price_per_liter || snapshot.pumps.price_per_liter || 0,
+            price_per_liter: parseFloat(pump.price_per_liter || 0),
           }
-        })
-
-      // Add pumps that have no snapshot (no sales this shift) — show with 0 liters
-      const missingPumps = (pumpsData || [])
-        .filter(p => !snapshotPumpIds.has(p.id))
-        .map(p => ({
-          pump_id: p.id,
-          pump_name: p.pump_name,
-          pump_number: p.pump_number,
-          fuel_type: p.fuel_type,
-          category: p.category || 'regular',
-          short_code: p.pump_name,
-          beginning_reading: parseFloat(p.current_reading || 0),
-          ending_reading: parseFloat(p.current_reading || 0),
-          liters_dispensed: 0,
-          adjustment_liters: 0,
-          price_per_liter: parseFloat(p.price_per_liter || 0),
-        }))
-
-      const readingsArray = [...snapshotReadings, ...missingPumps]
-        .sort((a, b) => {
-          const numA = a.pump_number || 0
-          const numB = b.pump_number || 0
-          if (numA !== numB) return numA - numB
-          return (a.pump_name || '').localeCompare(b.pump_name || '')
         })
 
       setFuelReadings(readingsArray)
