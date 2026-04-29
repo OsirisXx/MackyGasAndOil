@@ -68,7 +68,7 @@ export default function CashierAccountability({ isOpen, onClose }) {
       })
 
       // Ensure shift snapshots exist and are updated
-      await ensureCurrentShiftSnapshots(selectedBranchId, currentBranch?.name)
+      await ensureCurrentShiftSnapshots(selectedBranchId, currentBranch?.name, selectedShift)
       await updateShiftReadings(selectedBranchId)
 
       // Fetch pumps with current readings
@@ -117,21 +117,21 @@ export default function CashierAccountability({ isOpen, onClose }) {
         .gte('created_at', start)
         .lte('created_at', end)
 
-      // Fetch deposits
+      // Fetch deposits (use deposit_date for accurate shift filtering)
       const { data: deps } = await supabase
         .from('cash_deposits')
         .select('*')
         .eq('branch_id', selectedBranchId)
-        .gte('created_at', start)
-        .lte('created_at', end)
+        .gte('deposit_date', start)
+        .lte('deposit_date', end)
 
-      // Fetch withdrawals
+      // Fetch withdrawals (use withdrawal_date for accurate shift filtering)
       const { data: withs } = await supabase
         .from('cash_withdrawals')
         .select('*')
         .eq('branch_id', selectedBranchId)
-        .gte('created_at', start)
-        .lte('created_at', end)
+        .gte('withdrawal_date', start)
+        .lte('withdrawal_date', end)
 
       // Fetch calibrations for selected shift only
       const { data: cals } = await supabase

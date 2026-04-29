@@ -48,6 +48,8 @@ export default function POS() {
   const [poCustomerMode, setPoCustomerMode] = useState('select') // 'type' or 'select'
   const [showPoDropdown, setShowPoDropdown] = useState(false)
   const poDropdownRef = useRef(null)
+  const [poEntryMode, setPoEntryMode] = useState('amount') // 'amount' or 'liters'
+  const [poLitersInput, setPoLitersInput] = useState('')
 
   // Today's transactions
   const [todaySales, setTodaySales] = useState([])
@@ -107,7 +109,7 @@ export default function POS() {
       fetchTodayData()
       fetchPumps(cashier.branch_id || selectedBranchId)
       // Ensure shift snapshots exist for current shift
-      ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name)
+      ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name, selectedShift)
     }
   }, [cashier, selectedBranchId])
 
@@ -223,7 +225,7 @@ export default function POS() {
     try {
       // IMPORTANT: Ensure shift snapshots exist BEFORE recording the sale
       // This guarantees the trigger can update the snapshot's ending_reading
-      await ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name)
+      await ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name, selectedShift)
       
       // Find fuel_type_id based on pump's fuel_type text
       const fuelTypeMatch = fuelTypes.find(ft => ft.name === selectedPump?.fuel_type)
@@ -269,15 +271,30 @@ export default function POS() {
       toast.error('No connection. Please check your internet and try again.')
       return
     }
-    if (!poCustomer || !poAmount) return toast.error('Please fill all required fields')
-    if (!poAmount || parseFloat(poAmount) <= 0) return toast.error('Enter a valid amount')
+    // Validate — pump is ALWAYS required for accurate accountability
+    if (!poCustomer) return toast.error('Please fill all required fields')
+    if (!poPumpId) return toast.error('Please select a pump')
+    if (poEntryMode === 'liters') {
+      if (!poLitersInput || parseFloat(poLitersInput) <= 0) return toast.error('Enter valid liters')
+    } else {
+      if (!poAmount || parseFloat(poAmount) <= 0) return toast.error('Enter a valid amount')
+    }
     setSaving(true)
     try {
       // IMPORTANT: Ensure shift snapshots exist BEFORE recording the PO
-      await ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name)
+      await ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name, selectedShift)
       
       const poPump = pumps.find(p => p.id === poPumpId)
-      const poLiters = poPump && poAmount ? (parseFloat(poAmount) / parseFloat(poPump.price_per_liter)).toFixed(3) : null
+      let finalAmount, finalLiters
+      if (poEntryMode === 'liters') {
+        // Liters mode: user entered liters, calculate amount
+        finalLiters = parseFloat(poLitersInput)
+        finalAmount = poPump ? parseFloat((finalLiters * parseFloat(poPump.price_per_liter)).toFixed(2)) : 0
+      } else {
+        // Amount mode: user entered amount, calculate liters (existing behavior)
+        finalAmount = parseFloat(poAmount)
+        finalLiters = poPump && poAmount ? parseFloat((finalAmount / parseFloat(poPump.price_per_liter)).toFixed(3)) : null
+      }
       // Find fuel_type_id based on pump's fuel_type text
       const poFuelTypeMatch = fuelTypes.find(ft => ft.name === poPump?.fuel_type)
       const { error } = await supabase.from('purchase_orders').insert({
@@ -286,8 +303,8 @@ export default function POS() {
         customer_name: poCustomer,
         pump_id: poPumpId || null,
         fuel_type_id: poFuelTypeMatch?.id || null,
-        amount: parseFloat(poAmount),
-        liters: poLiters ? parseFloat(poLiters) : null,
+        amount: finalAmount,
+        liters: finalLiters,
         price_per_liter: poPump ? parseFloat(poPump.price_per_liter) : null,
         plate_number: poPlate || null,
         notes: poNotes || null,
@@ -297,8 +314,8 @@ export default function POS() {
       })
       if (error) throw error
       toast.success('Purchase order created!')
-      logAudit('create', 'purchase_order', `PO ₱${parseFloat(poAmount).toFixed(2)} - ${poPump?.pump_name} [Shift ${selectedShift}]`, {
-        newValues: { amount: parseFloat(poAmount), pump_id: poPumpId, shift_date: currentShiftDate, shift_number: selectedShift },
+      logAudit('create', 'purchase_order', `PO ₱${finalAmount.toFixed(2)} - ${poPump?.pump_name} [Shift ${selectedShift}]`, {
+        newValues: { amount: finalAmount, pump_id: poPumpId, shift_date: currentShiftDate, shift_number: selectedShift },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
@@ -309,6 +326,8 @@ export default function POS() {
       setPoAmount('')
       setPoPlate('')
       setPoNotes('')
+      setPoEntryMode('amount')
+      setPoLitersInput('')
       setShowPO(false)
       fetchTodayData()
     } catch (err) {
@@ -1079,7 +1098,7 @@ export default function POS() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-2">Select Pump</label>
+                    <label className="block text-xs font-medium text-gray-500 mb-2">Select Pump <span className="text-red-500">*</span></label>
                     {pumps.length === 0 ? (
                       <div className="text-center py-4 text-gray-400 text-xs">
                         No pumps configured
@@ -1125,11 +1144,55 @@ export default function POS() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Amount (₱)</label>
-                    <input type="number" step="0.01" value={poAmount}
-                      onChange={e => setPoAmount(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-xl text-2xl font-bold text-center text-gray-800 focus:ring-2 focus:ring-amber-500 outline-none"
-                      placeholder="0.00" required />
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Amount / Liters</label>
+                    {/* Entry Mode Toggle */}
+                    <div className="flex gap-1 mb-2">
+                      <button type="button"
+                        onClick={() => { setPoEntryMode('amount'); setPoLitersInput(''); setPoAmount(''); }}
+                        className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          poEntryMode === 'amount' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                        ₱ Amount
+                      </button>
+                      <button type="button"
+                        onClick={() => { setPoEntryMode('liters'); setPoLitersInput(''); setPoAmount(''); }}
+                        className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          poEntryMode === 'liters' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                        Liters
+                      </button>
+                    </div>
+
+                    {poEntryMode === 'amount' ? (
+                      <div>
+                        <input type="number" step="0.01" value={poAmount}
+                          onChange={e => setPoAmount(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-200 rounded-xl text-2xl font-bold text-center text-gray-800 focus:ring-2 focus:ring-amber-500 outline-none"
+                          placeholder="0.00" required />
+                        {poPumpId && poAmount && (
+                          <p className="text-xs text-gray-500 mt-1 text-center">
+                            ≈ {(parseFloat(poAmount) / parseFloat(pumps.find(p => p.id === poPumpId)?.price_per_liter || 1)).toFixed(3)} liters
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div>
+                        <input type="number" step="0.001" value={poLitersInput}
+                          onChange={e => setPoLitersInput(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-200 rounded-xl text-2xl font-bold text-center text-gray-800 focus:ring-2 focus:ring-amber-500 outline-none"
+                          placeholder="0.000" required />
+                        {poPumpId && poLitersInput && (
+                          <p className="text-xs text-gray-500 mt-1 text-center">
+                            = ₱{(parseFloat(poLitersInput) * parseFloat(pumps.find(p => p.id === poPumpId)?.price_per_liter || 0)).toFixed(2)}
+                          </p>
+                        )}
+                        {!poPumpId && poLitersInput && (
+                          <p className="text-xs text-amber-500 mt-1 text-center">
+                            Select a pump to calculate amount
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <input type="text" value={poPlate} onChange={e => setPoPlate(e.target.value)}
@@ -1139,7 +1202,7 @@ export default function POS() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-amber-500"
                     placeholder="Notes (optional)" />
 
-                  <button type="submit" disabled={saving || !poAmount || !poCustomer}
+                  <button type="submit" disabled={saving || !poCustomer || !poPumpId || (poEntryMode === 'amount' ? !poAmount : !poLitersInput)}
                     className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold py-3.5 rounded-xl text-lg transition-colors disabled:opacity-50">
                     {saving ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

@@ -8,11 +8,34 @@ import { format } from 'date-fns'
  * This function handles shift transitions automatically:
  * - If current shift is different from open snapshot, it closes the old and opens new
  * - Uses previous shift's ending_reading as new shift's beginning_reading
+ *
+ * @param {string} branchId - The branch UUID
+ * @param {string} branchName - The branch name (used for shift schedule lookup)
+ * @param {number|null} shiftNumber - Explicit shift number from cashier selection.
+ *   When provided, skips auto-detection/transition and ensures snapshots for this specific shift.
+ *   When null, uses existing auto-detection behavior.
  */
-export async function ensureCurrentShiftSnapshots(branchId, branchName) {
+export async function ensureCurrentShiftSnapshots(branchId, branchName, shiftNumber = null) {
   if (!branchId) return { success: false, error: 'No branch ID' }
 
   try {
+    // When an explicit shift number is provided, skip the auto-detect RPC
+    // (which uses wall-clock time and may auto-close/transition shifts).
+    // Instead, go directly to create_shift_snapshots for the specified shift.
+    if (shiftNumber) {
+      const today = format(new Date(), 'yyyy-MM-dd')
+      const { data, error } = await supabase.rpc('create_shift_snapshots', {
+        p_branch_id: branchId,
+        p_shift_date: today,
+        p_shift_number: shiftNumber
+      })
+      if (error) {
+        return { success: false, error: error.message }
+      }
+      return { success: true, snapshotsCreated: data }
+    }
+
+    // No explicit shift — use existing auto-detection behavior:
     // Call the database function that handles everything:
     // 1. Detects if shift has changed
     // 2. Updates ending_reading on old shift
@@ -26,7 +49,7 @@ export async function ensureCurrentShiftSnapshots(branchId, branchName) {
     if (error) {
       console.error('Error ensuring shift snapshots:', error)
       // Fallback to old method if new function doesn't exist yet
-      const currentShift = getCurrentShift(branchName)
+      const currentShift = shiftNumber || getCurrentShift(branchName)
       const today = format(new Date(), 'yyyy-MM-dd')
       const { data: fallbackData, error: fallbackError } = await supabase.rpc('create_shift_snapshots', {
         p_branch_id: branchId,

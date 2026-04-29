@@ -26,6 +26,7 @@ export default function AccountabilityReport() {
   const [chargeInvoices, setChargeInvoices] = useState([])
   const [calibrations, setCalibrations] = useState([])
   const [deposits, setDeposits] = useState([])
+  const [withdrawals, setWithdrawals] = useState([])
   const [checks, setChecks] = useState([])
   const [expenses, setExpenses] = useState([])
   const [purchases, setPurchases] = useState([])
@@ -92,10 +93,11 @@ export default function AccountabilityReport() {
         if (selectedBranchId) afterShiftCalsQ = afterShiftCalsQ.eq('branch_id', selectedBranchId)
       }
 
-      let depQ = supabase.from('cash_deposits').select('*, cashiers(full_name)').gte('created_at', start).lte('created_at', end)
+      // Use deposit_date/withdrawal_date for filtering (not created_at) — these reflect the actual transaction time
+      let depQ = supabase.from('cash_deposits').select('*, cashiers(full_name)').gte('deposit_date', start).lte('deposit_date', end)
       if (selectedBranchId) depQ = depQ.eq('branch_id', selectedBranchId)
 
-      let withQ = supabase.from('cash_withdrawals').select('*, cashiers(full_name)').gte('created_at', start).lte('created_at', end)
+      let withQ = supabase.from('cash_withdrawals').select('*, cashiers(full_name)').gte('withdrawal_date', start).lte('withdrawal_date', end)
       if (selectedBranchId) withQ = withQ.eq('branch_id', selectedBranchId)
 
       let chkQ = supabase.from('checks').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
@@ -148,8 +150,10 @@ export default function AccountabilityReport() {
         const startH = parseHour(shiftConfig.startTime)
         const endH = parseHour(shiftConfig.endTime)
         return items.filter(item => {
-          const ts = item.created_at || item.deposit_date || item.withdrawal_date
+          // Use the most relevant timestamp: deposit_date for deposits, withdrawal_date for withdrawals, created_at for sales/POs
+          const ts = item.deposit_date || item.withdrawal_date || item.created_at
           if (!ts) return false
+          // getHours() returns local time (browser timezone) which should be PH (UTC+8)
           const hour = new Date(ts).getHours()
           if (endH <= startH) return hour >= startH || hour < endH
           return hour >= startH && hour < endH
@@ -212,6 +216,7 @@ export default function AccountabilityReport() {
       setChargeInvoices(ci || [])
       setCalibrations(cal || [])
       setDeposits(dep || [])
+      setWithdrawals(withdrawalsData || [])
       setChecks(chk || [])
       setExpenses(exp || [])
       setPurchases(pur || [])
@@ -238,6 +243,7 @@ export default function AccountabilityReport() {
   const totalMiscellaneous = productSales.miscellaneous
   const totalChargeInvoices = chargeInvoices.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalDeposits = deposits.reduce((s, d) => s + parseFloat(d.amount || 0), 0)
+  const totalWithdrawals = withdrawals.reduce((s, w) => s + parseFloat(w.amount || 0), 0)
   const totalCashDeposit = totalDeposits
   const totalGcash = 0
   const totalChecks = checks.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
@@ -275,6 +281,7 @@ export default function AccountabilityReport() {
   const totalAccountability = totalFuelSales + totalOilLubes + totalAccessories + totalServices + totalMiscellaneous
   const netAccountability = totalAccountability - totalCalibrations
   const totalRemittance = totalDeposits + totalChecks
+  const expectedCash = netAccountability - totalChargeInvoices - totalExpenses - totalPurchases
   const shortOver = totalRemittance - (totalAccountability - totalChargeInvoices - totalExpenses - totalPurchases - totalCalibrations)
 
   const handlePrint = () => {
@@ -601,6 +608,48 @@ export default function AccountabilityReport() {
           </table>
         </div>
 
+        {/* Vault Withdrawals */}
+        <div className="mb-4">
+          <p className="font-bold text-sm mb-2">VAULT WITHDRAWALS (CASH OUT)</p>
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 p-2 text-left">#</th>
+                <th className="border border-gray-300 p-2 text-left">CASHIER</th>
+                <th className="border border-gray-300 p-2 text-right">AMOUNT</th>
+                <th className="border border-gray-300 p-2 text-left">REASON</th>
+                <th className="border border-gray-300 p-2 text-left">NOTES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {withdrawals.length === 0 ? (
+                <tr><td colSpan={5} className="border border-gray-300 p-2 text-center text-gray-400">No vault withdrawals this shift</td></tr>
+              ) : withdrawals.map((w, idx) => (
+                <tr key={w.id}>
+                  <td className="border border-gray-300 p-2">{idx + 1}</td>
+                  <td className="border border-gray-300 p-2">{w.cashiers?.full_name || '—'}</td>
+                  <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(w.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td className="border border-gray-300 p-2 text-xs">{w.reason || ''}</td>
+                  <td className="border border-gray-300 p-2 text-xs">{w.notes || ''}</td>
+                </tr>
+              ))}
+              <tr className="bg-gray-50 font-bold">
+                <td colSpan={2} className="border border-gray-300 p-2 text-right">TOTAL VAULT WITHDRAWALS</td>
+                <td className="border border-gray-300 p-2 text-right font-mono">{totalWithdrawals.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td colSpan={2} className="border border-gray-300 p-2"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Net Vault Total */}
+        <div className="flex justify-end mb-4">
+          <div className="border-2 border-gray-400 px-4 py-2">
+            <span className="font-bold">NET VAULT: </span>
+            <span className="font-mono font-bold">₱{(totalDeposits - totalWithdrawals).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+          </div>
+        </div>
+
         {/* Deposit Totals */}
         <div className="flex justify-end gap-4 mb-4">
           <div className="border border-gray-300 px-3 py-2 text-sm">
@@ -662,9 +711,14 @@ export default function AccountabilityReport() {
           <div>
             <table className="w-full border-collapse text-xs">
               <tbody>
-                <tr><td className="border border-gray-300 p-2 font-medium">Total Remittance:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">{totalRemittance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
-                <tr><td className="border border-gray-300 p-2 font-medium">Short/Over:</td><td className="border border-gray-300 p-2 text-right font-mono">{shortOver.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
-                <tr><td className="border border-gray-300 p-2 font-medium">Total Sales:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr className="bg-gray-50"><td className="border border-gray-300 p-2 font-bold">TOTAL ACCOUNTABILITY:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr><td className="border border-gray-300 p-2 font-medium text-gray-600">Less: D. Charge Invoices:</td><td className="border border-gray-300 p-2 text-right font-mono text-red-600">₱{totalChargeInvoices.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr><td className="border border-gray-300 p-2 font-medium text-gray-600">Less: E. Expenses:</td><td className="border border-gray-300 p-2 text-right font-mono text-red-600">₱{totalExpenses.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr><td className="border border-gray-300 p-2 font-medium text-gray-600">Less: F. Purchases:</td><td className="border border-gray-300 p-2 text-right font-mono text-red-600">₱{totalPurchases.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr className="bg-yellow-50 border-t-2 border-gray-800"><td className="border border-gray-300 p-2 font-bold">= EXPECTED CASH:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">₱{expectedCash.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr><td className="border border-gray-300 p-2 font-medium">TOTAL REMITTANCE:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">₱{totalRemittance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr className={`${shortOver < 0 ? 'bg-red-50' : shortOver > 0 ? 'bg-green-50' : ''}`}><td className="border border-gray-300 p-2 font-bold">SHORT/OVER:</td><td className={`border border-gray-300 p-2 text-right font-mono font-bold ${shortOver < 0 ? 'text-red-600' : shortOver > 0 ? 'text-green-600' : ''}`}>₱{shortOver.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                <tr className="bg-gray-50"><td className="border border-gray-300 p-2 font-medium">Total Sales:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
               </tbody>
             </table>
           </div>
