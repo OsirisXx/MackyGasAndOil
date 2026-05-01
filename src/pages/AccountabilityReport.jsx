@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useFuelStore } from '../stores/fuelStore'
 import { useBranchStore } from '../stores/branchStore'
 import { getShiftsForBranch, formatShiftTime } from '../utils/shiftConfig'
+import { groupDepositsByType, filterActiveDeposits, getDepositTypeLabel, getUnitTypeLabel } from '../utils/vaultHelpers'
 import { ensureCurrentShiftSnapshots, updateShiftReadings } from '../services/shiftService'
 import { format } from 'date-fns'
 import { FileText, Printer, RefreshCw } from 'lucide-react'
@@ -28,7 +29,6 @@ export default function AccountabilityReport() {
   const [deposits, setDeposits] = useState([])
   const [withdrawals, setWithdrawals] = useState([])
   const [checks, setChecks] = useState([])
-  const [expenses, setExpenses] = useState([])
   const [purchases, setPurchases] = useState([])
   const [productSales, setProductSales] = useState({ oil_lubes: 0, accessories: 0, services: 0, miscellaneous: 0 })
   const [fuelDeliveries, setFuelDeliveries] = useState([])
@@ -103,9 +103,6 @@ export default function AccountabilityReport() {
       let chkQ = supabase.from('checks').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) chkQ = chkQ.eq('branch_id', selectedBranchId)
 
-      let expQ = supabase.from('expenses').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
-      if (selectedBranchId) expQ = expQ.eq('branch_id', selectedBranchId)
-
       let purQ = supabase.from('purchases_disbursements').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
       if (selectedBranchId) purQ = purQ.eq('branch_id', selectedBranchId)
 
@@ -116,7 +113,7 @@ export default function AccountabilityReport() {
       if (selectedBranchId) delQ = delQ.eq('branch_id', selectedBranchId)
 
       // Build all promises
-      const promises = [pumpsQ, salesQ, ciQ, depQ, withQ, chkQ, expQ, purQ, calQ, delQ]
+      const promises = [pumpsQ, salesQ, ciQ, depQ, withQ, chkQ, purQ, calQ, delQ]
       if (afterShiftSalesQ) promises.push(afterShiftSalesQ, afterShiftPOsQ, afterShiftCalsQ)
 
       const results = await Promise.all(promises)
@@ -126,13 +123,12 @@ export default function AccountabilityReport() {
       const allDayDep = results[3].data
       const allDayWith = results[4].data
       const chk = results[5].data
-      const exp = results[6].data
-      const pur = results[7].data
-      const cal = results[8].data
-      const fuelDeliveries = results[9].data
-      const afterSales = results[10]?.data || []
-      const afterPOs = results[11]?.data || []
-      const afterCals = results[12]?.data || []
+      const pur = results[6].data
+      const cal = results[7].data
+      const fuelDeliveries = results[8].data
+      const afterSales = results[9]?.data || []
+      const afterPOs = results[10]?.data || []
+      const afterCals = results[11]?.data || []
 
       // Filter day's data by shift
       const filterByShift = (items) => {
@@ -218,7 +214,6 @@ export default function AccountabilityReport() {
       setDeposits(dep || [])
       setWithdrawals(withdrawalsData || [])
       setChecks(chk || [])
-      setExpenses(exp || [])
       setPurchases(pur || [])
     } catch (err) {
       console.error('AccountabilityReport fetch error:', err)
@@ -242,12 +237,16 @@ export default function AccountabilityReport() {
   const totalServices = productSales.services
   const totalMiscellaneous = productSales.miscellaneous
   const totalChargeInvoices = chargeInvoices.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
-  const totalDeposits = deposits.reduce((s, d) => s + parseFloat(d.amount || 0), 0)
+  // Filter out soft-deleted deposits and group by type
+  const activeDeposits = filterActiveDeposits(deposits)
+  const depositsByType = groupDepositsByType(activeDeposits)
+  const totalDeposits = activeDeposits.reduce((s, d) => s + parseFloat(d.amount || 0), 0)
   const totalWithdrawals = withdrawals.reduce((s, w) => s + parseFloat(w.amount || 0), 0)
-  const totalCashDeposit = totalDeposits
-  const totalGcash = 0
+  const totalCashDeposit = depositsByType.vault_deposit
+  const totalGcash = depositsByType.gcash
+  const totalCashRegister = depositsByType.cash_register
   const totalChecks = checks.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
-  const totalExpenses = expenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0)
+  const totalExpenses = totalWithdrawals
   const totalPurchases = purchases.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
   const totalCalibrations = calibrations.reduce((s, c) => s + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
   const totalCalibrationLiters = calibrations.reduce((s, c) => s + parseFloat(c.liters || 0), 0)
@@ -576,10 +575,13 @@ export default function AccountabilityReport() {
           </div>
         </div>
 
-        {/* Vault Deposits */}
+        {/* Vault Deposits - Grouped by Type */}
         <div className="mb-4">
           <p className="font-bold text-sm mb-2">VAULT DEPOSITS</p>
-          <table className="w-full border-collapse text-xs">
+
+          {/* Vault Deposit (type: vault_deposit) */}
+          <p className="font-semibold text-xs mb-1 text-blue-700">Vault Deposits</p>
+          <table className="w-full border-collapse text-xs mb-2">
             <thead>
               <tr className="bg-gray-100">
                 <th className="border border-gray-300 p-2 text-left">#</th>
@@ -589,19 +591,88 @@ export default function AccountabilityReport() {
               </tr>
             </thead>
             <tbody>
-              {deposits.length === 0 ? (
-                <tr><td colSpan={4} className="border border-gray-300 p-2 text-center text-gray-400">No vault deposits this shift</td></tr>
-              ) : deposits.map((dep, idx) => (
-                <tr key={dep.id}>
-                  <td className="border border-gray-300 p-2">{idx + 1}</td>
-                  <td className="border border-gray-300 p-2">{dep.cashiers?.full_name || '—'}</td>
-                  <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                  <td className="border border-gray-300 p-2 text-xs">{dep.notes || ''}</td>
-                </tr>
-              ))}
+              {(() => {
+                const vaultDeps = activeDeposits.filter(d => !d.deposit_type || d.deposit_type === 'vault_deposit')
+                return vaultDeps.length === 0 ? (
+                  <tr><td colSpan={4} className="border border-gray-300 p-2 text-center text-gray-400">No vault deposits this shift</td></tr>
+                ) : vaultDeps.map((dep, idx) => (
+                  <tr key={dep.id}>
+                    <td className="border border-gray-300 p-2">{idx + 1}</td>
+                    <td className="border border-gray-300 p-2">{dep.cashiers?.full_name || '—'}</td>
+                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td className="border border-gray-300 p-2 text-xs">{dep.notes || ''}</td>
+                  </tr>
+                ))
+              })()}
               <tr className="bg-gray-50 font-bold">
                 <td colSpan={2} className="border border-gray-300 p-2 text-right">TOTAL VAULT DEPOSITS</td>
-                <td className="border border-gray-300 p-2 text-right font-mono">{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td className="border border-gray-300 p-2 text-right font-mono">{depositsByType.vault_deposit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td className="border border-gray-300 p-2"></td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* GCash */}
+          <p className="font-semibold text-xs mb-1 text-green-700">GCash</p>
+          <table className="w-full border-collapse text-xs mb-2">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 p-2 text-left">#</th>
+                <th className="border border-gray-300 p-2 text-left">CASHIER</th>
+                <th className="border border-gray-300 p-2 text-right">AMOUNT</th>
+                <th className="border border-gray-300 p-2 text-left">NOTES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const gcashDeps = activeDeposits.filter(d => d.deposit_type === 'gcash')
+                return gcashDeps.length === 0 ? (
+                  <tr><td colSpan={4} className="border border-gray-300 p-2 text-center text-gray-400">No GCash deposits this shift</td></tr>
+                ) : gcashDeps.map((dep, idx) => (
+                  <tr key={dep.id}>
+                    <td className="border border-gray-300 p-2">{idx + 1}</td>
+                    <td className="border border-gray-300 p-2">{dep.cashiers?.full_name || '—'}</td>
+                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td className="border border-gray-300 p-2 text-xs">{dep.notes || ''}</td>
+                  </tr>
+                ))
+              })()}
+              <tr className="bg-gray-50 font-bold">
+                <td colSpan={2} className="border border-gray-300 p-2 text-right">TOTAL GCASH</td>
+                <td className="border border-gray-300 p-2 text-right font-mono">{depositsByType.gcash.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td className="border border-gray-300 p-2"></td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Cash Register */}
+          <p className="font-semibold text-xs mb-1 text-purple-700">Cash Register</p>
+          <table className="w-full border-collapse text-xs mb-2">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 p-2 text-left">#</th>
+                <th className="border border-gray-300 p-2 text-left">CASHIER</th>
+                <th className="border border-gray-300 p-2 text-right">AMOUNT</th>
+                <th className="border border-gray-300 p-2 text-left">NOTES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const cashRegDeps = activeDeposits.filter(d => d.deposit_type === 'cash_register')
+                return cashRegDeps.length === 0 ? (
+                  <tr><td colSpan={4} className="border border-gray-300 p-2 text-center text-gray-400">No cash register deposits this shift</td></tr>
+                ) : cashRegDeps.map((dep, idx) => (
+                  <tr key={dep.id}>
+                    <td className="border border-gray-300 p-2">{idx + 1}</td>
+                    <td className="border border-gray-300 p-2">{dep.cashiers?.full_name || '—'}</td>
+                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td className="border border-gray-300 p-2 text-xs">{dep.notes || ''}</td>
+                  </tr>
+                ))
+              })()}
+              <tr className="bg-gray-50 font-bold">
+                <td colSpan={2} className="border border-gray-300 p-2 text-right">TOTAL CASH REGISTER</td>
+                <td className="border border-gray-300 p-2 text-right font-mono">{depositsByType.cash_register.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                 <td className="border border-gray-300 p-2"></td>
               </tr>
             </tbody>
@@ -653,12 +724,16 @@ export default function AccountabilityReport() {
         {/* Deposit Totals */}
         <div className="flex justify-end gap-4 mb-4">
           <div className="border border-gray-300 px-3 py-2 text-sm">
-            <span className="font-medium">A. TOTAL CASH DEPOSIT:</span>
+            <span className="font-medium">A. VAULT DEPOSITS:</span>
             <span className="font-mono font-bold ml-2">{totalCashDeposit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
           </div>
           <div className="border border-gray-300 px-3 py-2 text-sm">
-            <span className="font-medium">B. TOTAL CASH REGISTER:</span>
+            <span className="font-medium">GCASH:</span>
             <span className="font-mono font-bold ml-2">{totalGcash.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+          </div>
+          <div className="border border-gray-300 px-3 py-2 text-sm">
+            <span className="font-medium">CASH REGISTER:</span>
+            <span className="font-mono font-bold ml-2">{totalCashRegister.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
           </div>
         </div>
 
@@ -705,6 +780,7 @@ export default function AccountabilityReport() {
                 {totalCalibrations > 0 && (
                   <tr className="bg-pink-50"><td className="border border-gray-300 p-2 font-medium text-pink-700">G. CALIBRATION ({totalCalibrationLiters.toFixed(2)}L)</td><td className="border border-gray-300 p-2 text-right font-mono text-pink-700">{totalCalibrations.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 )}
+                <tr className="bg-green-50"><td className="border border-gray-300 p-2 font-medium text-green-700">H. ACTUAL VAULT COLLECTABLES</td><td className="border border-gray-300 p-2 text-right font-mono font-bold text-green-700">{(totalCashDeposit + totalCashRegister - totalWithdrawals).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
               </tbody>
             </table>
           </div>
@@ -734,64 +810,92 @@ export default function AccountabilityReport() {
 
           <p className="font-bold text-sm mb-2">A. SUMMARY OF CHARGE INVOICES</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <table className="w-full border-collapse text-xs">
+            <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[9px]">
               <thead>
                 <tr className="bg-gray-100">
-                  <th className="border border-gray-300 p-2 text-left">C.I NO.</th>
-                  <th className="border border-gray-300 p-2 text-left">CUSTOMER</th>
-                  <th className="border border-gray-300 p-2 text-right">AMOUNT</th>
+                  <th className="border border-gray-300 p-1 text-left whitespace-nowrap">C.I. No.</th>
+                  <th className="border border-gray-300 p-1 text-left whitespace-nowrap">P.O. Slip No.</th>
+                  <th className="border border-gray-300 p-1 text-left">CUSTOMER</th>
+                  <th className="border border-gray-300 p-1 text-left whitespace-nowrap">PLATE NO.</th>
+                  <th className="border border-gray-300 p-1 text-left">DESCRIPTION</th>
+                  <th className="border border-gray-300 p-1 text-center">UNIT</th>
+                  <th className="border border-gray-300 p-1 text-right">AMOUNT</th>
                 </tr>
               </thead>
               <tbody>
                 {chargeInvoices.slice(0, 15).map((ci, i) => (
                   <tr key={ci.id}>
-                    <td className="border border-gray-300 p-2">{ci.po_number || ''}</td>
-                    <td className="border border-gray-300 p-2">{ci.customer_name} {ci.fuel_types?.short_code ? `(${ci.fuel_types.short_code})` : ''}</td>
-                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(ci.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td className="border border-gray-300 p-1">{ci.ci_number || ci.po_number || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.po_slip_number || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.customer_name || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.plate_number || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.description || '—'}</td>
+                    <td className="border border-gray-300 p-1 text-center">{getUnitTypeLabel(ci.unit_type)}</td>
+                    <td className="border border-gray-300 p-1 text-right font-mono">{parseFloat(ci.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
                 {chargeInvoices.length < 15 && Array(15 - chargeInvoices.length).fill(0).map((_, i) => (
                   <tr key={`empty-${i}`}>
-                    <td className="border border-gray-300 p-2">&nbsp;</td>
-                    <td className="border border-gray-300 p-2"></td>
-                    <td className="border border-gray-300 p-2"></td>
+                    <td className="border border-gray-300 p-1">&nbsp;</td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
                   </tr>
                 ))}
                 <tr className="bg-gray-50 font-bold">
-                  <td colSpan={2} className="border border-gray-300 p-2 text-right">SUBTOTAL</td>
-                  <td className="border border-gray-300 p-2 text-right font-mono">{chargeInvoices.slice(0, 15).reduce((s, c) => s + parseFloat(c.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td colSpan={6} className="border border-gray-300 p-1 text-right">SUBTOTAL</td>
+                  <td className="border border-gray-300 p-1 text-right font-mono">{chargeInvoices.slice(0, 15).reduce((s, c) => s + parseFloat(c.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                 </tr>
               </tbody>
             </table>
-            <table className="w-full border-collapse text-xs">
+            </div>
+            <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[9px]">
               <thead>
                 <tr className="bg-gray-100">
-                  <th className="border border-gray-300 p-2 text-left">C.I NO.</th>
-                  <th className="border border-gray-300 p-2 text-left">CUSTOMER</th>
-                  <th className="border border-gray-300 p-2 text-right">AMOUNT</th>
+                  <th className="border border-gray-300 p-1 text-left whitespace-nowrap">C.I. No.</th>
+                  <th className="border border-gray-300 p-1 text-left whitespace-nowrap">P.O. Slip No.</th>
+                  <th className="border border-gray-300 p-1 text-left">CUSTOMER</th>
+                  <th className="border border-gray-300 p-1 text-left whitespace-nowrap">PLATE NO.</th>
+                  <th className="border border-gray-300 p-1 text-left">DESCRIPTION</th>
+                  <th className="border border-gray-300 p-1 text-center">UNIT</th>
+                  <th className="border border-gray-300 p-1 text-right">AMOUNT</th>
                 </tr>
               </thead>
               <tbody>
                 {chargeInvoices.slice(15, 30).map((ci, i) => (
                   <tr key={ci.id}>
-                    <td className="border border-gray-300 p-2">{ci.po_number || ''}</td>
-                    <td className="border border-gray-300 p-2">{ci.customer_name} {ci.fuel_types?.short_code ? `(${ci.fuel_types.short_code})` : ''}</td>
-                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(ci.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td className="border border-gray-300 p-1">{ci.ci_number || ci.po_number || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.po_slip_number || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.customer_name || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.plate_number || '—'}</td>
+                    <td className="border border-gray-300 p-1">{ci.description || '—'}</td>
+                    <td className="border border-gray-300 p-1 text-center">{getUnitTypeLabel(ci.unit_type)}</td>
+                    <td className="border border-gray-300 p-1 text-right font-mono">{parseFloat(ci.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
                 {chargeInvoices.length < 30 && Array(Math.max(0, 15 - chargeInvoices.slice(15).length)).fill(0).map((_, i) => (
                   <tr key={`empty2-${i}`}>
-                    <td className="border border-gray-300 p-2">&nbsp;</td>
-                    <td className="border border-gray-300 p-2"></td>
-                    <td className="border border-gray-300 p-2"></td>
+                    <td className="border border-gray-300 p-1">&nbsp;</td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
+                    <td className="border border-gray-300 p-1"></td>
                   </tr>
                 ))}
                 <tr className="bg-gray-50 font-bold">
-                  <td colSpan={2} className="border border-gray-300 p-2 text-right">SUBTOTAL</td>
-                  <td className="border border-gray-300 p-2 text-right font-mono">{chargeInvoices.slice(15, 30).reduce((s, c) => s + parseFloat(c.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td colSpan={6} className="border border-gray-300 p-1 text-right">SUBTOTAL</td>
+                  <td className="border border-gray-300 p-1 text-right font-mono">{chargeInvoices.slice(15, 30).reduce((s, c) => s + parseFloat(c.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                 </tr>
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* Grand Total Charge Invoices */}
@@ -801,8 +905,8 @@ export default function AccountabilityReport() {
             </div>
           </div>
 
-          {/* Expenses */}
-          <p className="font-bold text-sm mb-2">C. EXPENSES</p>
+          {/* Expenses (from Withdrawals) */}
+          <p className="font-bold text-sm mb-2">C. EXPENSES (WITHDRAWALS)</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <table className="w-full border-collapse text-xs">
               <thead>
@@ -812,13 +916,13 @@ export default function AccountabilityReport() {
                 </tr>
               </thead>
               <tbody>
-                {expenses.slice(0, 8).map(e => (
-                  <tr key={e.id}>
-                    <td className="border border-gray-300 p-2">{e.nature}</td>
-                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(e.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                {withdrawals.slice(0, 8).map(w => (
+                  <tr key={w.id}>
+                    <td className="border border-gray-300 p-2">{w.reason || '—'}</td>
+                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(w.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
-                {expenses.length < 8 && Array(8 - expenses.length).fill(0).map((_, i) => (
+                {withdrawals.length < 8 && Array(8 - withdrawals.length).fill(0).map((_, i) => (
                   <tr key={`exp-empty-${i}`}>
                     <td className="border border-gray-300 p-2">&nbsp;</td>
                     <td className="border border-gray-300 p-2"></td>
@@ -826,7 +930,7 @@ export default function AccountabilityReport() {
                 ))}
                 <tr className="bg-gray-50 font-bold">
                   <td className="border border-gray-300 p-2 text-right">SUBTOTAL</td>
-                  <td className="border border-gray-300 p-2 text-right font-mono">{expenses.slice(0, 8).reduce((s, e) => s + parseFloat(e.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td className="border border-gray-300 p-2 text-right font-mono">{withdrawals.slice(0, 8).reduce((s, w) => s + parseFloat(w.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                 </tr>
               </tbody>
             </table>
@@ -838,13 +942,13 @@ export default function AccountabilityReport() {
                 </tr>
               </thead>
               <tbody>
-                {expenses.slice(8, 16).map(e => (
-                  <tr key={e.id}>
-                    <td className="border border-gray-300 p-2">{e.nature}</td>
-                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(e.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                {withdrawals.slice(8, 16).map(w => (
+                  <tr key={w.id}>
+                    <td className="border border-gray-300 p-2">{w.reason || '—'}</td>
+                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(w.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
-                {Array(Math.max(0, 8 - expenses.slice(8).length)).fill(0).map((_, i) => (
+                {Array(Math.max(0, 8 - withdrawals.slice(8).length)).fill(0).map((_, i) => (
                   <tr key={`exp-empty2-${i}`}>
                     <td className="border border-gray-300 p-2">&nbsp;</td>
                     <td className="border border-gray-300 p-2"></td>
@@ -852,7 +956,7 @@ export default function AccountabilityReport() {
                 ))}
                 <tr className="bg-gray-50 font-bold">
                   <td className="border border-gray-300 p-2 text-right">SUBTOTAL</td>
-                  <td className="border border-gray-300 p-2 text-right font-mono">{expenses.slice(8, 16).reduce((s, e) => s + parseFloat(e.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td className="border border-gray-300 p-2 text-right font-mono">{withdrawals.slice(8, 16).reduce((s, w) => s + parseFloat(w.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                 </tr>
               </tbody>
             </table>

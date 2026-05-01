@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useBranchStore } from '../stores/branchStore'
 import { format } from 'date-fns'
-import { Vault, Calendar, Filter, Edit2, Trash2, Save, X, Search, DollarSign, Receipt } from 'lucide-react'
+import { Vault, Calendar, Filter, Edit2, Trash2, Save, X, Search, DollarSign, Receipt, RotateCcw, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
+import { getDepositTypeLabel } from '../utils/vaultHelpers'
 
 export default function CashDeposits() {
   const { branches, selectedBranchId } = useBranchStore()
@@ -18,12 +19,19 @@ export default function CashDeposits() {
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('deposits')
+  const [selectedType, setSelectedType] = useState('')
+  const [showDeleted, setShowDeleted] = useState(false)
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [createForm, setCreateForm] = useState({
+    cashier_id: '', amount: '', deposit_type: 'vault_deposit', notes: '',
+    deposit_date: format(new Date(), "yyyy-MM-dd'T'HH:mm")
+  })
 
   useEffect(() => {
     fetchCashiers()
     fetchDeposits()
     fetchWithdrawals()
-  }, [selectedBranchId, selectedDate, selectedCashier])
+  }, [selectedBranchId, selectedDate, selectedCashier, selectedType, showDeleted])
 
   const fetchCashiers = async () => {
     const query = supabase.from('cashiers').select('id, full_name').order('full_name')
@@ -56,6 +64,14 @@ export default function CashDeposits() {
 
       if (selectedCashier) {
         query = query.eq('cashier_id', selectedCashier)
+      }
+
+      if (!showDeleted) {
+        query = query.is('deleted_at', null)
+      }
+
+      if (selectedType) {
+        query = query.eq('deposit_type', selectedType)
       }
 
       const { data, error } = await query
@@ -148,18 +164,71 @@ export default function CashDeposits() {
   }
 
   const handleDelete = async (id, amount) => {
-    if (!confirm(`Delete this ₱${parseFloat(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} deposit?`)) return
+    if (!confirm(`Soft-delete this ₱${parseFloat(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} deposit? It can be restored later.`)) return
     setSaving(true)
     try {
       const { error } = await supabase
         .from('cash_deposits')
-        .delete()
+        .update({ deleted_at: new Date().toISOString() })
         .eq('id', id)
 
       if (error) throw error
-      toast.success('Deposit deleted')
-      logAudit('delete', 'cash_deposit', `Deleted cash deposit of ₱${parseFloat(amount).toFixed(2)}`, {
+      toast.success('Deposit soft-deleted')
+      logAudit('delete', 'cash_deposit', `Soft-deleted cash deposit of ₱${parseFloat(amount).toFixed(2)}`, {
         entityId: id
+      })
+      fetchDeposits()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRestore = async (id, amount) => {
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('cash_deposits')
+        .update({ deleted_at: null })
+        .eq('id', id)
+
+      if (error) throw error
+      toast.success('Deposit restored!')
+      logAudit('update', 'cash_deposit', `Restored deposit ₱${parseFloat(amount).toFixed(2)}`, {
+        entityId: id
+      })
+      fetchDeposits()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateDeposit = async () => {
+    if (!createForm.cashier_id || !createForm.amount || parseFloat(createForm.amount) <= 0) {
+      return toast.error('Please fill all required fields')
+    }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('cash_deposits').insert({
+        cashier_id: createForm.cashier_id,
+        branch_id: selectedBranchId || null,
+        amount: parseFloat(createForm.amount),
+        deposit_type: createForm.deposit_type,
+        deposit_date: createForm.deposit_date,
+        notes: createForm.notes || null,
+      })
+      if (error) throw error
+      toast.success('Deposit created!')
+      logAudit('create', 'cash_deposit', `Admin created deposit ₱${parseFloat(createForm.amount).toFixed(2)} (${getDepositTypeLabel(createForm.deposit_type)})`, {
+        newValues: createForm
+      })
+      setShowCreateForm(false)
+      setCreateForm({
+        cashier_id: '', amount: '', deposit_type: 'vault_deposit', notes: '',
+        deposit_date: format(new Date(), "yyyy-MM-dd'T'HH:mm")
       })
       fetchDeposits()
     } catch (err) {
@@ -189,7 +258,7 @@ export default function CashDeposits() {
           <Filter size={16} className="text-gray-400" />
           <h2 className="text-sm font-semibold text-gray-700">Filters</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
             <div className="relative">
@@ -231,6 +300,37 @@ export default function CashDeposits() {
               ))}
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Deposit Type</label>
+            <select
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="">All Types</option>
+              <option value="vault_deposit">Vault Deposit</option>
+              <option value="gcash">GCash</option>
+              <option value="cash_register">Cash Register</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showDeleted}
+              onChange={(e) => setShowDeleted(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Show Deleted
+          </label>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={16} />
+            Create Deposit
+          </button>
         </div>
       </div>
 
@@ -333,6 +433,7 @@ export default function CashDeposits() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date & Time</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Cashier</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Branch</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Type</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Notes</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Actions</th>
@@ -341,19 +442,19 @@ export default function CashDeposits() {
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
+                    <td colSpan="7" className="px-4 py-8 text-center text-sm text-gray-400">
                       Loading deposits...
                     </td>
                   </tr>
                 ) : deposits.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400">
+                    <td colSpan="7" className="px-4 py-8 text-center text-sm text-gray-400">
                       No deposits found for the selected filters
                     </td>
                   </tr>
                 ) : (
                   deposits.map(deposit => (
-                  <tr key={deposit.id} className="hover:bg-gray-50">
+                  <tr key={deposit.id} className={`hover:bg-gray-50 ${deposit.deleted_at ? 'opacity-50 bg-red-50' : ''}`}>
                     {editingId === deposit.id ? (
                       <>
                         <td className="px-4 py-3">
@@ -369,6 +470,9 @@ export default function CashDeposits() {
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
                           {deposit.branches?.name || 'N/A'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {getDepositTypeLabel(deposit.deposit_type)}
                         </td>
                         <td className="px-4 py-3">
                           <input
@@ -418,6 +522,11 @@ export default function CashDeposits() {
                         <td className="px-4 py-3 text-sm text-gray-600">
                           {deposit.branches?.name || 'N/A'}
                         </td>
+                        <td className="px-4 py-3 text-sm">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            {getDepositTypeLabel(deposit.deposit_type)}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-sm text-right font-semibold text-blue-600">
                           ₱{parseFloat(deposit.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                         </td>
@@ -426,18 +535,30 @@ export default function CashDeposits() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => handleEdit(deposit)}
-                              className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded transition-colors"
-                            >
-                              <Edit2 size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(deposit.id, deposit.amount)}
-                              className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded transition-colors"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            {deposit.deleted_at ? (
+                              <button
+                                onClick={() => handleRestore(deposit.id, deposit.amount)}
+                                disabled={saving}
+                                className="p-1.5 bg-green-50 text-green-600 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
+                              >
+                                <RotateCcw size={16} />
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleEdit(deposit)}
+                                  className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                                >
+                                  <Edit2 size={16} />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(deposit.id, deposit.amount)}
+                                  className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded transition-colors"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </>
@@ -507,6 +628,86 @@ export default function CashDeposits() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      {/* Create Deposit Modal */}
+      {showCreateForm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Create Deposit</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Cashier *</label>
+                <select
+                  value={createForm.cashier_id}
+                  onChange={(e) => setCreateForm({ ...createForm, cashier_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="">Select cashier...</option>
+                  {cashiers.map(c => (
+                    <option key={c.id} value={c.id}>{c.full_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Amount *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={createForm.amount}
+                  onChange={(e) => setCreateForm({ ...createForm, amount: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Deposit Type *</label>
+                <select
+                  value={createForm.deposit_type}
+                  onChange={(e) => setCreateForm({ ...createForm, deposit_type: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="vault_deposit">Vault Deposit</option>
+                  <option value="gcash">GCash</option>
+                  <option value="cash_register">Cash Register</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Date/Time *</label>
+                <input
+                  type="datetime-local"
+                  value={createForm.deposit_date}
+                  onChange={(e) => setCreateForm({ ...createForm, deposit_date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+                <textarea
+                  value={createForm.notes}
+                  onChange={(e) => setCreateForm({ ...createForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  rows={2}
+                  placeholder="Optional notes..."
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowCreateForm(false)}
+                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateDeposit}
+                  disabled={saving || !createForm.cashier_id || !createForm.amount}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

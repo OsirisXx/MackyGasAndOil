@@ -8,10 +8,11 @@ import { useCustomerStore } from '../stores/customerStore'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 import { getCurrentShift, getShiftsForBranch } from '../utils/shiftConfig'
+import { VAULT_TABS, getDepositTypeLabel } from '../utils/vaultHelpers'
 import { ensureCurrentShiftSnapshots } from '../services/shiftService'
 import {
   Fuel, DollarSign, Plus, ShoppingCart, FileText,
-  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi, Vault, Truck, Gauge, Beaker, ChevronDown
+  Clock, LogOut, CheckCircle, Banknote, CreditCard, Package, Search, Minus, WifiOff, Wifi, Vault, Truck, Gauge, Beaker, ChevronDown, Smartphone
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
@@ -50,6 +51,12 @@ export default function POS() {
   const poDropdownRef = useRef(null)
   const [poEntryMode, setPoEntryMode] = useState('amount') // 'amount' or 'liters'
   const [poLitersInput, setPoLitersInput] = useState('')
+  const [poMode, setPoMode] = useState('fuel') // 'fuel' or 'product'
+  const [poCiNumber, setPoCiNumber] = useState('')
+  const [poSlipNumber, setPoSlipNumber] = useState('')
+  const [poDescription, setPoDescription] = useState('')
+  const [poUnitType, setPoUnitType] = useState('liters') // 'liters' or 'pcs'
+  const [poProductId, setPoProductId] = useState('')
 
   // Today's transactions
   const [todaySales, setTodaySales] = useState([])
@@ -66,7 +73,7 @@ export default function POS() {
 
   // Vault state (unified deposits & withdrawals)
   const [showVault, setShowVault] = useState(false)
-  const [vaultTab, setVaultTab] = useState('deposit') // 'deposit' or 'withdraw'
+  const [vaultTab, setVaultTab] = useState('vault_deposit') // 'vault_deposit', 'withdraw', 'gcash', or 'cash_register'
   const [vaultAmount, setVaultAmount] = useState('')
   const [vaultNotes, setVaultNotes] = useState('')
   const [withdrawalReason, setWithdrawalReason] = useState('')
@@ -271,12 +278,18 @@ export default function POS() {
       toast.error('No connection. Please check your internet and try again.')
       return
     }
-    // Validate — pump is ALWAYS required for accurate accountability
+    // Validate based on mode
     if (!poCustomer) return toast.error('Please fill all required fields')
-    if (!poPumpId) return toast.error('Please select a pump')
-    if (poEntryMode === 'liters') {
-      if (!poLitersInput || parseFloat(poLitersInput) <= 0) return toast.error('Enter valid liters')
+    if (poMode === 'fuel') {
+      if (!poPumpId) return toast.error('Please select a pump')
+      if (poEntryMode === 'liters') {
+        if (!poLitersInput || parseFloat(poLitersInput) <= 0) return toast.error('Enter valid liters')
+      } else {
+        if (!poAmount || parseFloat(poAmount) <= 0) return toast.error('Enter a valid amount')
+      }
     } else {
+      // Product mode
+      if (!poProductId) return toast.error('Please select a product')
       if (!poAmount || parseFloat(poAmount) <= 0) return toast.error('Enter a valid amount')
     }
     setSaving(true)
@@ -284,38 +297,49 @@ export default function POS() {
       // IMPORTANT: Ensure shift snapshots exist BEFORE recording the PO
       await ensureCurrentShiftSnapshots(cashier.branch_id || selectedBranchId, cashier.branches?.name, selectedShift)
       
-      const poPump = pumps.find(p => p.id === poPumpId)
-      let finalAmount, finalLiters
-      if (poEntryMode === 'liters') {
-        // Liters mode: user entered liters, calculate amount
-        finalLiters = parseFloat(poLitersInput)
-        finalAmount = poPump ? parseFloat((finalLiters * parseFloat(poPump.price_per_liter)).toFixed(2)) : 0
+      let finalAmount, finalLiters, poPump, poFuelTypeMatch
+      if (poMode === 'fuel') {
+        poPump = pumps.find(p => p.id === poPumpId)
+        if (poEntryMode === 'liters') {
+          // Liters mode: user entered liters, calculate amount
+          finalLiters = parseFloat(poLitersInput)
+          finalAmount = poPump ? parseFloat((finalLiters * parseFloat(poPump.price_per_liter)).toFixed(2)) : 0
+        } else {
+          // Amount mode: user entered amount, calculate liters (existing behavior)
+          finalAmount = parseFloat(poAmount)
+          finalLiters = poPump && poAmount ? parseFloat((finalAmount / parseFloat(poPump.price_per_liter)).toFixed(3)) : null
+        }
+        // Find fuel_type_id based on pump's fuel_type text
+        poFuelTypeMatch = fuelTypes.find(ft => ft.name === poPump?.fuel_type)
       } else {
-        // Amount mode: user entered amount, calculate liters (existing behavior)
+        // Product mode: manual amount, no liters/pump
         finalAmount = parseFloat(poAmount)
-        finalLiters = poPump && poAmount ? parseFloat((finalAmount / parseFloat(poPump.price_per_liter)).toFixed(3)) : null
+        finalLiters = null
       }
-      // Find fuel_type_id based on pump's fuel_type text
-      const poFuelTypeMatch = fuelTypes.find(ft => ft.name === poPump?.fuel_type)
       const { error } = await supabase.from('purchase_orders').insert({
         cashier_id: cashier.id,
         branch_id: cashier.branch_id || null,
         customer_name: poCustomer,
-        pump_id: poPumpId || null,
-        fuel_type_id: poFuelTypeMatch?.id || null,
+        pump_id: poMode === 'fuel' ? poPumpId || null : null,
+        fuel_type_id: poMode === 'fuel' ? poFuelTypeMatch?.id || null : null,
         amount: finalAmount,
         liters: finalLiters,
         price_per_liter: poPump ? parseFloat(poPump.price_per_liter) : null,
         plate_number: poPlate || null,
         notes: poNotes || null,
+        ci_number: poCiNumber || null,
+        po_slip_number: poSlipNumber || null,
+        description: poDescription || null,
+        unit_type: poMode === 'fuel' ? 'liters' : poUnitType || 'pcs',
         status: 'unpaid',
         shift_date: currentShiftDate,
         shift_number: selectedShift,
       })
       if (error) throw error
       toast.success('Purchase order created!')
-      logAudit('create', 'purchase_order', `PO ₱${finalAmount.toFixed(2)} - ${poPump?.pump_name} [Shift ${selectedShift}]`, {
-        newValues: { amount: finalAmount, pump_id: poPumpId, shift_date: currentShiftDate, shift_number: selectedShift },
+      const auditLabel = poMode === 'fuel' ? poPump?.pump_name : poDescription || 'Product'
+      logAudit('create', 'purchase_order', `PO ₱${finalAmount.toFixed(2)} - ${auditLabel} [Shift ${selectedShift}]`, {
+        newValues: { amount: finalAmount, pump_id: poMode === 'fuel' ? poPumpId : null, mode: poMode, shift_date: currentShiftDate, shift_number: selectedShift },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
         cashierId: cashier.id,
@@ -328,6 +352,12 @@ export default function POS() {
       setPoNotes('')
       setPoEntryMode('amount')
       setPoLitersInput('')
+      setPoMode('fuel')
+      setPoCiNumber('')
+      setPoSlipNumber('')
+      setPoDescription('')
+      setPoUnitType('liters')
+      setPoProductId('')
       setShowPO(false)
       fetchTodayData()
     } catch (err) {
@@ -351,14 +381,16 @@ export default function POS() {
         cashier_id: cashier.id,
         branch_id: cashier.branch_id || null,
         amount: parseFloat(vaultAmount),
+        deposit_type: vaultTab,
         notes: vaultNotes || null,
         created_by: cashier.user_id,
         shift_date: currentShiftDate,
         shift_number: selectedShift,
       })
       if (error) throw error
+      const activeTab = VAULT_TABS.find(t => t.key === vaultTab)
       toast.success(`₱${parseFloat(vaultAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} deposited to vault!`)
-      logAudit('create', 'cash_deposit', `Vault deposit ₱${parseFloat(vaultAmount).toFixed(2)} [Shift ${selectedShift}]`, {
+      logAudit('create', 'cash_deposit', `${activeTab?.label || 'Vault Deposit'} ₱${parseFloat(vaultAmount).toFixed(2)} [Shift ${selectedShift}]`, {
         newValues: { amount: parseFloat(vaultAmount), shift_date: currentShiftDate, shift_number: selectedShift },
         branchId: cashier.branch_id,
         branchName: cashier.branches?.name,
@@ -994,6 +1026,24 @@ export default function POS() {
                 <p className="text-xs text-gray-400 mb-4">Gas taken but not yet paid — will be recorded as credit</p>
 
                 <form onSubmit={handleCreatePO} className="space-y-3">
+                  {/* PO Mode Toggle */}
+                  <div className="flex gap-1 mb-3">
+                    <button type="button"
+                      onClick={() => { setPoMode('fuel'); setPoProductId(''); setPoDescription(''); setPoUnitType('liters'); }}
+                      className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${
+                        poMode === 'fuel' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
+                      }`}>
+                      ⛽ Fuel (Pump)
+                    </button>
+                    <button type="button"
+                      onClick={() => { setPoMode('product'); setPoPumpId(''); setPoUnitType('pcs'); }}
+                      className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${
+                        poMode === 'product' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
+                      }`}>
+                      📦 Product/Lubes
+                    </button>
+                  </div>
+
                   <div className="relative">
                     <label className="block text-xs font-medium text-gray-500 mb-1">Customer Name *</label>
                     <div className="flex gap-1 mb-1.5">
@@ -1097,6 +1147,7 @@ export default function POS() {
                     )}
                   </div>
 
+                  {poMode === 'fuel' && (
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-2">Select Pump <span className="text-red-500">*</span></label>
                     {pumps.length === 0 ? (
@@ -1142,7 +1193,26 @@ export default function POS() {
                       </div>
                     )}
                   </div>
+                  )}
 
+                  {poMode === 'product' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-2">Select Product <span className="text-red-500">*</span></label>
+                    <select value={poProductId} onChange={e => {
+                      setPoProductId(e.target.value)
+                      const prod = products.find(p => p.id === e.target.value)
+                      if (prod) { setPoDescription(prod.name); setPoUnitType('pcs'); }
+                    }}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none" required>
+                      <option value="">Select a product...</option>
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} — ₱{parseFloat(p.price).toFixed(2)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  )}
+
+                  {poMode === 'fuel' && (
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Amount / Liters</label>
                     {/* Entry Mode Toggle */}
@@ -1194,6 +1264,32 @@ export default function POS() {
                       </div>
                     )}
                   </div>
+                  )}
+
+                  {poMode === 'product' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Amount (₱) <span className="text-red-500">*</span></label>
+                    <input type="number" step="0.01" value={poAmount}
+                      onChange={e => setPoAmount(e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-xl text-2xl font-bold text-center text-gray-800 focus:ring-2 focus:ring-amber-500 outline-none"
+                      placeholder="0.00" required />
+                  </div>
+                  )}
+
+                  {/* CI Number */}
+                  <input type="text" value={poCiNumber} onChange={e => setPoCiNumber(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    placeholder="C.I. Number (optional)" />
+
+                  {/* PO Slip Number */}
+                  <input type="text" value={poSlipNumber} onChange={e => setPoSlipNumber(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    placeholder="P.O. Slip Number (optional)" />
+
+                  {/* Description (auto-filled in product mode) */}
+                  <input type="text" value={poDescription} onChange={e => setPoDescription(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    placeholder="Description / Product (optional)" />
 
                   <input type="text" value={poPlate} onChange={e => setPoPlate(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-amber-500"
@@ -1202,7 +1298,7 @@ export default function POS() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-amber-500"
                     placeholder="Notes (optional)" />
 
-                  <button type="submit" disabled={saving || !poCustomer || !poPumpId || (poEntryMode === 'amount' ? !poAmount : !poLitersInput)}
+                  <button type="submit" disabled={saving || !poCustomer || (poMode === 'fuel' ? (!poPumpId || (poEntryMode === 'amount' ? !poAmount : !poLitersInput)) : (!poProductId || !poAmount))}
                     className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold py-3.5 rounded-xl text-lg transition-colors disabled:opacity-50">
                     {saving ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1519,31 +1615,24 @@ export default function POS() {
               <div className="w-1/2 border-r border-gray-200 flex flex-col">
                 {/* Tabs */}
                 <div className="flex border-b">
-                  <button
-                    onClick={() => setVaultTab('deposit')}
-                    className={`flex-1 py-3 text-sm font-semibold ${
-                      vaultTab === 'deposit'
-                        ? 'text-blue-600 border-b-2 border-blue-600'
-                        : 'text-gray-500'
-                    }`}
-                  >
-                    Deposit
-                  </button>
-                  <button
-                    onClick={() => setVaultTab('withdraw')}
-                    className={`flex-1 py-3 text-sm font-semibold ${
-                      vaultTab === 'withdraw'
-                        ? 'text-orange-600 border-b-2 border-orange-600'
-                        : 'text-gray-500'
-                    }`}
-                  >
-                    Withdraw
-                  </button>
+                  {VAULT_TABS.map(tab => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setVaultTab(tab.key)}
+                      className={`flex-1 py-3 text-xs font-semibold ${
+                        vaultTab === tab.key
+                          ? `text-${tab.color}-600 border-b-2 border-${tab.color}-600`
+                          : 'text-gray-500'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
 
                 {/* Forms */}
                 <div className="flex-1 overflow-y-auto">
-                  {vaultTab === 'deposit' && (
+                  {vaultTab !== 'withdraw' && (
                     <form onSubmit={handleVaultDeposit} className="p-6 space-y-4">
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">Amount (₱)</label>
@@ -1643,7 +1732,7 @@ export default function POS() {
                           <div className="flex items-center gap-2">
                             {t.type === 'deposit' ? <Plus size={14} className="text-blue-600" /> : <Minus size={14} className="text-orange-600" />}
                             <div>
-                              <p className="font-medium">{t.type === 'deposit' ? 'Deposit' : 'Withdrawal'}</p>
+                              <p className="font-medium">{t.type === 'deposit' ? getDepositTypeLabel(t.deposit_type) : 'Withdrawal'}</p>
                               <p className="text-[10px] text-gray-500">
                                 {format(new Date(t.deposit_date || t.withdrawal_date), 'h:mm a')} • {t.cashiers?.full_name || 'Unknown'}
                               </p>

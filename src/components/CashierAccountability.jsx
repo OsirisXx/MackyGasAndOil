@@ -5,6 +5,7 @@ import { useBranchStore } from '../stores/branchStore'
 import { useAuthStore } from '../stores/authStore'
 import { usePumpStore } from '../stores/pumpStore'
 import { getShiftsForBranch, getCurrentShift } from '../utils/shiftConfig'
+import { groupDepositsByType, filterActiveDeposits, getDepositTypeLabel } from '../utils/vaultHelpers'
 import { ensureCurrentShiftSnapshots, updateShiftReadings } from '../services/shiftService'
 import { format } from 'date-fns'
 import { X, RefreshCw, FileText, Fuel, DollarSign, TrendingUp, Package, CreditCard, Beaker } from 'lucide-react'
@@ -201,7 +202,9 @@ export default function CashierAccountability({ isOpen, onClose }) {
   
   const totalPurchaseOrders = purchaseOrders.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
   const totalProductSales = productSales.reduce((sum, p) => sum + parseFloat(p.total_amount || 0), 0)
-  const totalDeposits = deposits.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0)
+  const activeDeposits = filterActiveDeposits(deposits)
+  const depositsByType = groupDepositsByType(activeDeposits)
+  const totalDeposits = activeDeposits.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0)
   const totalWithdrawals = withdrawals.reduce((sum, w) => sum + parseFloat(w.amount || 0), 0)
   const totalCalibrations = calibrations.reduce((sum, c) => sum + parseFloat(c.amount || (c.liters * c.price_per_liter) || 0), 0)
   const totalCalibrationLiters = calibrations.reduce((sum, c) => sum + parseFloat(c.liters || 0), 0)
@@ -420,9 +423,21 @@ export default function CashierAccountability({ isOpen, onClose }) {
                 </span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-600">Deposits to Vault</span>
+                <span className="text-gray-600 pl-2">Vault Deposits</span>
                 <span className="font-mono font-semibold text-green-600">
-                  +₱{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  +₱{depositsByType.vault_deposit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-gray-600 pl-2">GCash</span>
+                <span className="font-mono font-semibold text-green-600">
+                  +₱{depositsByType.gcash.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-gray-600 pl-2">Cash Register</span>
+                <span className="font-mono font-semibold text-green-600">
+                  +₱{depositsByType.cash_register.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-gray-100">

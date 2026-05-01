@@ -6,6 +6,7 @@ import { Receipt, Search, Check, X, DollarSign, Printer, RefreshCw } from 'lucid
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
+import { getUnitTypeLabel } from '../utils/vaultHelpers'
 
 export default function PurchaseOrders() {
   const { fuelTypes, fetchFuelTypes } = useFuelStore()
@@ -45,7 +46,9 @@ export default function PurchaseOrders() {
   const filtered = orders.filter(o =>
     o.customer_name.toLowerCase().includes(search.toLowerCase()) ||
     (o.po_number || '').toLowerCase().includes(search.toLowerCase()) ||
-    (o.plate_number || '').toLowerCase().includes(search.toLowerCase())
+    (o.plate_number || '').toLowerCase().includes(search.toLowerCase()) ||
+    (o.ci_number || '').toLowerCase().includes(search.toLowerCase()) ||
+    (o.po_slip_number || '').toLowerCase().includes(search.toLowerCase())
   )
 
   const totalUnpaid = orders.filter(o => o.status === 'unpaid').reduce((s, o) => s + parseFloat(o.amount || 0), 0)
@@ -154,8 +157,12 @@ export default function PurchaseOrders() {
             <thead>
               <tr>
                 <th class="text-center" rowspan="2">DATE</th>
+                <th class="text-center" rowspan="2">C.I. No.</th>
+                <th class="text-center" rowspan="2">P.O. SLIP<br/>No.</th>
                 <th class="text-center" rowspan="2">CHARGE<br/>INVOICE</th>
                 <th class="text-center" rowspan="2">PLATE #</th>
+                <th class="text-center" rowspan="2">DESCRIPTION</th>
+                <th class="text-center" rowspan="2">UNIT</th>
                 <th class="text-center" rowspan="2">ITEMS<br/>WITHDRAWAL</th>
                 <th class="text-center" colspan="2">ARTILES</th>
                 <th class="text-center">UNIT<br/>PRICE</th>
@@ -172,8 +179,12 @@ export default function PurchaseOrders() {
               ${ordersWithCalc.map(o => `
                 <tr>
                   <td class="text-center">${format(new Date(o.created_at), 'd-MMM')}</td>
+                  <td class="text-center">${o.ci_number || o.po_number || '—'}</td>
+                  <td class="text-center">${o.po_slip_number || '—'}</td>
                   <td class="text-center">${o.po_number || '—'}</td>
                   <td class="text-center">${o.plate_number || '—'}</td>
+                  <td class="text-center">${o.description || '—'}</td>
+                  <td class="text-center">${o.unit_type === 'liters' ? 'Liters' : o.unit_type === 'pcs' ? 'Pcs' : '—'}</td>
                   <td class="text-center">${o.fuel_types?.short_code || 'DIESEL'}</td>
                   <td class="text-center">LITER</td>
                   <td class="text-center">${o.liters.toFixed(2)}</td>
@@ -257,7 +268,7 @@ export default function PurchaseOrders() {
         <div className="relative flex-1 min-w-[200px]">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search by customer, PO#, plate..."
+            placeholder="Search by customer, PO#, plate, CI#, slip#..."
             className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
         <div>
@@ -308,9 +319,13 @@ export default function PurchaseOrders() {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Date</th>
+                <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">C.I. No.</th>
+                <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">P.O. Slip No.</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Customer</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Fuel</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Plate</th>
+                <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Description</th>
+                <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Unit</th>
                 <th className="text-right py-3 px-4 text-gray-500 font-medium text-xs">Amount</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Cashier</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium text-xs">Status</th>
@@ -319,9 +334,9 @@ export default function PurchaseOrders() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-8 text-gray-400">Loading...</td></tr>
+                <tr><td colSpan={12} className="text-center py-8 text-gray-400">Loading...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-8 text-gray-400">No purchase orders found</td></tr>
+                <tr><td colSpan={12} className="text-center py-8 text-gray-400">No purchase orders found</td></tr>
               ) : (
                 filtered.map(o => (
                   <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50">
@@ -329,6 +344,8 @@ export default function PurchaseOrders() {
                       {format(new Date(o.created_at), 'MMM d, yyyy')}<br/>
                       <span className="text-gray-400">{format(new Date(o.created_at), 'h:mm a')}</span>
                     </td>
+                    <td className="py-3 px-4 text-gray-500 text-xs">{o.ci_number || o.po_number || '—'}</td>
+                    <td className="py-3 px-4 text-gray-500 text-xs">{o.po_slip_number || '—'}</td>
                     <td className="py-3 px-4 font-medium text-gray-800">{o.customer_name}</td>
                     <td className="py-3 px-4">
                       {o.fuel_types ? (
@@ -336,6 +353,8 @@ export default function PurchaseOrders() {
                       ) : '—'}
                     </td>
                     <td className="py-3 px-4 text-gray-500 font-mono text-xs">{o.plate_number || '—'}</td>
+                    <td className="py-3 px-4 text-gray-500 text-xs">{o.description || '—'}</td>
+                    <td className="py-3 px-4 text-gray-500 text-xs">{getUnitTypeLabel(o.unit_type)}</td>
                     <td className="py-3 px-4 text-right font-bold text-gray-800">
                       ₱{parseFloat(o.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                     </td>
