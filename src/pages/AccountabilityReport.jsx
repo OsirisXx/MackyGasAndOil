@@ -279,9 +279,9 @@ export default function AccountabilityReport() {
   // Total accountability includes calibration, then we deduct it at the end
   const totalAccountability = totalFuelSales + totalOilLubes + totalAccessories + totalServices + totalMiscellaneous
   const netAccountability = totalAccountability - totalCalibrations
-  const totalRemittance = totalDeposits + totalChecks
+  const totalRemittance = totalCashDeposit + totalGcash + totalCashRegister + totalWithdrawals
   const expectedCash = netAccountability - totalChargeInvoices - totalExpenses - totalPurchases
-  const shortOver = totalRemittance - (totalAccountability - totalChargeInvoices - totalExpenses - totalPurchases - totalCalibrations)
+  const shortOver = (totalRemittance + totalChargeInvoices) - totalAccountability
 
   const handlePrint = () => {
     const printContent = printRef.current
