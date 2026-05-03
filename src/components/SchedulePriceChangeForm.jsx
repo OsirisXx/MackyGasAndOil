@@ -5,7 +5,7 @@ import { useAuthStore } from '../stores/authStore'
 import toast from 'react-hot-toast'
 
 export default function SchedulePriceChangeForm({ branchId, pumps, onSuccess, onCancel, editingSchedule }) {
-  const { user } = useAuthStore()
+  const { adminUser } = useAuthStore()
   
   // Form state
   const [scheduledDate, setScheduledDate] = useState('')
@@ -173,8 +173,8 @@ export default function SchedulePriceChangeForm({ branchId, pumps, onSuccess, on
         pump_ids: selectedPumpIds,
         price_changes: priceChanges,
         notes: notes || null,
-        created_by: user.id,
-        created_by_name: user.email,
+        created_by: adminUser?.id || null,
+        created_by_name: adminUser?.email || 'Unknown',
         updated_at: new Date().toISOString()
       }
 

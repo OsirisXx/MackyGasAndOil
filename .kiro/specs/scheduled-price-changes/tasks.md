@@ -354,7 +354,7 @@ This implementation plan breaks down the Scheduled Price Changes feature into di
     - Verify audit log contains: operation type, timestamp, user identity, old values (for updates), new values
     - Verify audit log retention (entries exist for at least 365 days)
 
-- [x] 15. Add error handling and user feedback
+- [ ] 15. Add error handling and user feedback
   - [x] 15.1 Add client-side validation with error messages
     - Validate scheduled datetime is at least 1 minute in future
     - Validate all prices are positive numbers with max 2 decimals

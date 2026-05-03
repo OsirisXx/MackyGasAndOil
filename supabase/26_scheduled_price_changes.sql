@@ -265,58 +265,41 @@ $$ LANGUAGE plpgsql;
 -- Enable RLS on price_change_schedules
 ALTER TABLE public.price_change_schedules ENABLE ROW LEVEL SECURITY;
 
--- Policy: Admins can view all schedules
-CREATE POLICY "Admins can view all schedules"
+-- Policy: Authenticated users can view all schedules
+-- (Admin check happens in the application layer)
+CREATE POLICY "Authenticated users can view schedules"
   ON public.price_change_schedules
   FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM auth.users
-      WHERE auth.users.id = auth.uid()
-      AND auth.users.role = 'admin'
-    )
-  );
+  USING (auth.uid() IS NOT NULL);
 
--- Policy: Admins can create schedules
-CREATE POLICY "Admins can create schedules"
+-- Policy: Authenticated users can create schedules
+CREATE POLICY "Authenticated users can create schedules"
   ON public.price_change_schedules
   FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM auth.users
-      WHERE auth.users.id = auth.uid()
-      AND auth.users.role = 'admin'
-    )
-  );
+  WITH CHECK (auth.uid() IS NOT NULL);
 
--- Policy: Admins can update schedules
-CREATE POLICY "Admins can update schedules"
+-- Policy: Authenticated users can update schedules
+CREATE POLICY "Authenticated users can update schedules"
   ON public.price_change_schedules
   FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM auth.users
-      WHERE auth.users.id = auth.uid()
-      AND auth.users.role = 'admin'
-    )
-  );
+  USING (auth.uid() IS NOT NULL);
 
 -- Enable RLS on notifications
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
--- Policy: Users can view their own notifications or broadcast notifications
+-- Policy: Authenticated users can view their own notifications or broadcast notifications
 CREATE POLICY "Users can view their notifications"
   ON public.notifications
   FOR SELECT
   USING (
-    user_id = auth.uid() OR user_id IS NULL
+    auth.uid() IS NOT NULL AND (user_id = auth.uid() OR user_id IS NULL)
   );
 
--- Policy: Users can update their own notifications (mark as read)
+-- Policy: Authenticated users can update their own notifications (mark as read)
 CREATE POLICY "Users can update their notifications"
   ON public.notifications
   FOR UPDATE
-  USING (user_id = auth.uid());
+  USING (auth.uid() IS NOT NULL AND user_id = auth.uid());
 
 -- Policy: System can insert notifications (via service role)
 CREATE POLICY "System can insert notifications"
