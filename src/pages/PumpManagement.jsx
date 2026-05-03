@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { usePumpStore } from '../stores/pumpStore'
 import { useBranchStore } from '../stores/branchStore'
 import { useFuelDeliveryStore } from '../stores/fuelDeliveryStore'
-import { Plus, Edit2, Trash2, Save, X, AlertTriangle, Fuel, Gauge, Settings } from 'lucide-react'
+import { Plus, Edit2, Trash2, Save, X, AlertTriangle, Fuel, Gauge, Settings, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
+import SchedulePriceChangeForm from '../components/SchedulePriceChangeForm'
+import ScheduleList from '../components/ScheduleList'
 
 export default function PumpManagement() {
   const { pumps, fetchPumps, createPump, updatePump, deletePump, initializePumpReading, adjustPumpReading, loading } = usePumpStore()
@@ -17,6 +19,11 @@ export default function PumpManagement() {
   const [readingModal, setReadingModal] = useState(null) // { pump, mode: 'initialize' | 'adjust' }
   const [readingInput, setReadingInput] = useState('')
   const [adjustReason, setAdjustReason] = useState('')
+  
+  // Schedule management state
+  const [showScheduleForm, setShowScheduleForm] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState(null)
+  const [showSchedules, setShowSchedules] = useState(false)
 
   const [formData, setFormData] = useState({
     pump_number: '',
@@ -182,6 +189,23 @@ export default function PumpManagement() {
     }
   }
 
+  // Schedule management handlers
+  const handleScheduleSuccess = () => {
+    setShowScheduleForm(false)
+    setEditingSchedule(null)
+    toast.success(editingSchedule ? 'Schedule updated' : 'Schedule created')
+  }
+
+  const handleScheduleCancel = () => {
+    setShowScheduleForm(false)
+    setEditingSchedule(null)
+  }
+
+  const handleEditSchedule = (schedule) => {
+    setEditingSchedule(schedule)
+    setShowScheduleForm(true)
+  }
+
   const selectedBranch = branches.find((b) => b.id === selectedBranchId)
 
   return (
@@ -193,14 +217,39 @@ export default function PumpManagement() {
             Configure pumps for {selectedBranch?.name || 'selected branch'}
           </p>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          disabled={!selectedBranchId}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showForm ? 'Cancel' : 'Add Pump'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setShowSchedules(!showSchedules)
+              setShowScheduleForm(false)
+            }}
+            disabled={!selectedBranchId}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Clock className="w-4 h-4" />
+            {showSchedules ? 'Hide Schedules' : 'View Schedules'}
+          </button>
+          <button
+            onClick={() => {
+              setShowScheduleForm(!showScheduleForm)
+              setEditingSchedule(null)
+              setShowSchedules(false)
+            }}
+            disabled={!selectedBranchId}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Clock className="w-4 h-4" />
+            Schedule Price Change
+          </button>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            disabled={!selectedBranchId}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            {showForm ? 'Cancel' : 'Add Pump'}
+          </button>
+        </div>
       </div>
 
       {!selectedBranchId && (
@@ -209,6 +258,29 @@ export default function PumpManagement() {
             <AlertTriangle className="w-5 h-5 text-amber-600" />
             <p className="text-sm text-amber-800">Please select a branch to manage pumps</p>
           </div>
+        </div>
+      )}
+
+      {/* Schedule Price Change Form */}
+      {showScheduleForm && selectedBranchId && (
+        <SchedulePriceChangeForm
+          branchId={selectedBranchId}
+          pumps={pumps}
+          onSuccess={handleScheduleSuccess}
+          onCancel={handleScheduleCancel}
+          editingSchedule={editingSchedule}
+        />
+      )}
+
+      {/* Scheduled Changes List */}
+      {showSchedules && selectedBranchId && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Scheduled Price Changes</h2>
+          <ScheduleList
+            branchId={selectedBranchId}
+            onEdit={handleEditSchedule}
+            onRefresh={() => {}}
+          />
         </div>
       )}
 

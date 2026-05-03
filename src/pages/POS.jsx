@@ -120,6 +120,39 @@ export default function POS() {
     }
   }, [cashier, selectedBranchId])
 
+  // Subscribe to pump price changes for real-time updates
+  useEffect(() => {
+    if (!cashier?.branch_id && !selectedBranchId) return
+
+    const branchId = cashier?.branch_id || selectedBranchId
+
+    const channel = supabase
+      .channel('pump_price_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pumps',
+          filter: `branch_id=eq.${branchId}`
+        },
+        (payload) => {
+          console.log('Pump price updated:', payload)
+          // Refresh pumps to get new prices
+          fetchPumps(branchId)
+          toast.success('Pump prices updated', {
+            icon: '💰',
+            duration: 3000
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [cashier?.branch_id, selectedBranchId])
+
   // Fetch all unique customers from purchase_orders for autocomplete
   const fetchAllCustomers = async () => {
     const { data } = await supabase

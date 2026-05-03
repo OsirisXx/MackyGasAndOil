@@ -1,0 +1,8 @@
+# ============================================================================
+# Cron Configuration: price-change-scheduler
+# Description: Runs the price change scheduler every 60 seconds (every minute)
+# ============================================================================
+
+- name: "price-change-scheduler"
+  schedule: "* * * * *"  # Every minute
+  function: "price-change-scheduler"
