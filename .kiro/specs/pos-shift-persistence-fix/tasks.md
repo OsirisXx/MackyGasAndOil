@@ -1,0 +1,131 @@
+# Implementation Plan
+
+- [ ] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - Price Change Broadcast Kicks Cashier to Shift Selection
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: Scope the property to concrete failing case: cashier with confirmed shift receives price change broadcast
+  - Test that when a price change broadcast is received (`event === 'price_change'`) and cashier has confirmed shift (`shiftConfirmed === true` and `selectedShift !== null`), the cashier is NOT redirected to shift selection screen
+  - Test that a centered alert modal is displayed showing old → new prices for each updated pump
+  - Test that the cashier can dismiss the modal and continue working without re-selecting shift
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found: cashier is kicked to shift selection when broadcast triggers `fetchPumps()` re-render
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.5, 2.6_
+
+- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Initial Shift Selection and Manual Shift Change Behavior
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-buggy inputs (initial login, manual shift change, checkout)
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements
+  - Test 1: Initial shift selection - when cashier has NOT confirmed shift (`shiftConfirmed === false` or `selectedShift === null`) and no price update is in progress, shift selection screen is displayed
+  - Test 2: Manual shift change - when cashier uses change shift dialog, shift is updated and audit log is created
+  - Test 3: Shift checkout - when cashier ends shift, sessionStorage is cleared and shift state is reset
+  - Test 4: Transaction recording - when cashier records sales, POs, deposits, or withdrawals, correct shift information is saved
+  - Test 5: sessionStorage persistence - when `selectedShift` and `shiftConfirmed` change, values are saved to sessionStorage
+  - Property-based testing generates many test cases for stronger guarantees
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [-] 3. Fix for price change broadcast causing shift selection redirect
+
+  - [x] 3.1 Add price update state flag to bypass shift selection gate
+    - Add `const [isPriceUpdateInProgress, setIsPriceUpdateInProgress] = useState(false)` to POS component state
+    - This flag will be set to `true` when a price change broadcast is received and `false` after the update completes
+    - The flag prevents the shift selection gate from triggering during price updates
+    - _Bug_Condition: isBugCondition(input) where input.event === 'price_change' AND cashierIsLoggedIn() AND shiftIsConfirmed() AND fetchPumps() is called_
+    - _Expected_Behavior: Cashier sees price change alert modal and remains on POS terminal (not kicked to shift selection)_
+    - _Preservation: Initial shift selection, manual shift change, checkout, and transaction recording must remain unchanged_
+    - _Requirements: 2.1, 2.5, 2.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+  - [x] 3.2 Add price change alert modal state variables
+    - Add `const [showPriceChangeAlert, setShowPriceChangeAlert] = useState(false)` to control modal visibility
+    - Add `const [priceChanges, setPriceChanges] = useState([])` to store price change details (array of { pumpName, fuelType, oldPrice, newPrice })
+    - These states manage the modal display and content
+    - _Bug_Condition: isBugCondition(input) where input.event === 'price_change'_
+    - _Expected_Behavior: Modal displays old → new prices for each updated pump_
+    - _Preservation: Existing state management for shift selection, transactions, and vault operations must remain unchanged_
+    - _Requirements: 2.1, 2.2, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+  - [x] 3.3 Modify broadcast handler to capture old prices and show modal
+    - Update the broadcast subscription effect (around line 165-200 in POS.jsx)
+    - Set `isPriceUpdateInProgress = true` at the start of the broadcast handler
+    - Capture old pump prices before calling `fetchPumps()`: `const oldPrices = pumps.map(p => ({ id: p.id, name: p.pump_name, price: p.price_per_liter }))`
+    - Call `await fetchPumps(branchId)` to get updated prices
+    - After state updates, compare old vs new prices to build `priceChanges` array
+    - Set `showPriceChangeAlert = true` to display the modal
+    - Set `isPriceUpdateInProgress = false` after the update completes
+    - Remove the toast notification (replaced by modal)
+    - Use `setTimeout` with 100ms delay to ensure state updates before comparison
+    - _Bug_Condition: isBugCondition(input) where input.event === 'price_change' AND fetchPumps() is called_
+    - _Expected_Behavior: Modal shows old → new prices, cashier remains on POS screen_
+    - _Preservation: Broadcast subscription cleanup and channel management must remain unchanged_
+    - _Requirements: 2.1, 2.2, 2.4, 2.5, 2.6, 3.4_
+
+  - [x] 3.4 Modify shift selection gate to bypass during price updates
+    - Update the shift selection gate condition (around line 766 in POS.jsx)
+    - Change: `if (!shiftConfirmed || selectedShift === null)`
+    - To: `if ((!shiftConfirmed || selectedShift === null) && !isPriceUpdateInProgress)`
+    - This ensures the gate doesn't trigger during price updates while preserving initial login behavior
+    - _Bug_Condition: isBugCondition(input) where componentReRenders() AND shiftSelectionGateEvaluatesBeforeStateRestoration()_
+    - _Expected_Behavior: Gate is bypassed when isPriceUpdateInProgress is true, preventing redirect to shift selection_
+    - _Preservation: Initial shift selection flow when cashier first logs in must continue to work exactly as before_
+    - _Requirements: 2.5, 2.6, 3.1, 3.2, 3.3_
+
+  - [x] 3.5 Add price change alert modal component
+    - Add modal JSX after the "Change Shift Confirmation Dialog" (around line 830 in POS.jsx)
+    - Modal should render when `showPriceChangeAlert === true`
+    - Use fixed inset-0 with bg-black/60 backdrop and z-50 for proper layering
+    - Display title: "⚠️ Price Update Alert" with amber warning icon
+    - List each price change: "Pump 1 (Diesel): ₱55.00 → ₱56.50"
+    - Include informational message: "The following pump prices have been updated. Please check the new prices before making sales. This is an informational alert only - you can continue working."
+    - Add "Acknowledge & Continue" button that calls `setShowPriceChangeAlert(false)`
+    - Modal should be centered, max-w-md, with rounded-xl and shadow-2xl styling
+    - Use amber color scheme (amber-50, amber-100, amber-200, amber-700, amber-800) for warning context
+    - _Bug_Condition: isBugCondition(input) where input.event === 'price_change'_
+    - _Expected_Behavior: Modal displays old → new prices, cashier can dismiss and continue working_
+    - _Preservation: Existing modal components (Change Shift, PO, Vault, Products, Calibration) must remain unchanged_
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.6_
+
+  - [ ] 3.6 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Price Change Alert Modal Display Without Shift Selection Redirect
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - Verify that when price change broadcast is received, cashier sees alert modal and remains on POS screen
+    - Verify that cashier can dismiss modal and continue working without re-selecting shift
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
+
+  - [ ] 3.7 Verify preservation tests still pass
+    - **Property 2: Preservation** - Initial Shift Selection and Manual Shift Change Behavior
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - Verify initial shift selection flow still works for cashiers without confirmed shifts
+    - Verify manual shift change dialog and audit logging still work correctly
+    - Verify shift checkout and sessionStorage clearing still work correctly
+    - Verify transaction recording with correct shift information still works
+    - Verify sessionStorage persistence of `selectedShift` and `shiftConfirmed` still works
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all tests still pass after fix (no regressions)
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [ ] 4. Checkpoint - Ensure all tests pass
+  - Run all bug condition exploration tests and verify they pass
+  - Run all preservation tests and verify they pass
+  - Manually test the POS terminal with a cashier account:
+    - Log in and select a shift
+    - Trigger a scheduled price change (or simulate a broadcast)
+    - Verify the price change alert modal appears with correct old → new prices
+    - Verify the cashier is NOT kicked to shift selection
+    - Dismiss the modal and verify the cashier can continue working
+    - Verify initial shift selection still works for new logins
+    - Verify manual shift change dialog still works
+    - Verify shift checkout still works
+  - Ensure all tests pass, ask the user if questions arise

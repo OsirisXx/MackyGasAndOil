@@ -2,6 +2,7 @@
 // Supabase Edge Function: price-change-scheduler
 // Description: Monitors pending price change schedules and executes them
 //              at the scheduled time. Runs every 60 seconds via cron.
+//              Broadcasts to all POS terminals when prices change.
 // ============================================================================
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
@@ -65,6 +66,34 @@ serve(async (req) => {
     const failureCount = results.filter(r => !r.success).length
     
     console.log(`[Scheduler] Completed: ${successCount} succeeded, ${failureCount} failed`)
+    
+    // If any schedules were executed successfully, insert notification records
+    if (successCount > 0) {
+      console.log('[Scheduler] Inserting price change notifications')
+      
+      // Insert notification for each successfully executed schedule
+      for (const schedule of dueSchedules || []) {
+        const result = results.find(r => r.schedule_id === schedule.id)
+        if (result && result.success) {
+          const { error: notifError } = await supabase
+            .from('price_change_notifications')
+            .insert({
+              branch_id: schedule.branch_id,
+              pump_ids: schedule.pump_ids,
+              schedule_id: schedule.id
+            })
+          
+          if (notifError) {
+            console.error(`[Scheduler] Error inserting notification for schedule ${schedule.id}:`, notifError)
+          } else {
+            console.log(`[Scheduler] Notification inserted for branch ${schedule.branch_id}`)
+          }
+        }
+      }
+      
+      // Clean up old notifications (older than 1 hour)
+      await supabase.rpc('cleanup_old_price_notifications')
+    }
     
     return new Response(
       JSON.stringify({

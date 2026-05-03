@@ -1,0 +1,90 @@
+# Implementation Plan
+
+- [ ] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - Stable WebSocket Subscription Despite Double-Mounting
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: Scope the property to React StrictMode double-mounting scenarios
+  - Test that when POS component mounts in React StrictMode, the subscription establishes and maintains a stable WebSocket connection
+  - Verify that subscription status is "SUBSCRIBED" after double-mounting completes
+  - Verify that channelRef.current is not null after second mount
+  - Verify that broadcast messages can be received successfully
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found:
+    - Subscription status transitions to "TIMED_OUT" during double-mounting
+    - Console shows "WebSocket is closed before the connection is established"
+    - channelRef.current is null after second mount attempt
+    - Broadcast messages are not received by the component
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Broadcast Handling and Cleanup Behavior
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-buggy inputs (cases where subscription is already established)
+  - Write property-based tests capturing observed behavior patterns:
+    - When broadcast message is received, toast notification displays with correct message format
+    - When broadcast message is received, fetchPumps() is called with correct branch_id after 100ms delay
+    - When component unmounts, supabase.removeChannel() is called and channelRef is set to null
+    - When branch_id is missing, subscription creation is skipped (early return)
+    - When subscription status changes, console logging provides debugging information
+  - Property-based testing generates many test cases for stronger guarantees
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+
+- [ ] 3. Fix for broadcast subscription timeout
+
+  - [ ] 3.1 Implement the fix in src/pages/POS.jsx
+    - Remove the guard condition `if (channelRef.current) return` that prevents re-subscription
+    - Add cleanup of existing subscription before creating new one:
+      - Check if channelRef.current exists
+      - If exists, call supabase.removeChannel(channelRef.current)
+      - Set channelRef.current = null
+      - Update console log to "Cleaning up existing channel before re-subscribing"
+    - Maintain early return for missing branch_id: `if (!cashier?.branch_id && !selectedBranchId) return`
+    - Preserve all existing broadcast handling logic (toast notification, fetchPumps call)
+    - Preserve cleanup function with removeChannel and null assignment
+    - Preserve all console logging for subscription status
+    - _Bug_Condition: isBugCondition(input) where input.isReactStrictMode == true AND input.mountPhase == "second_mount" AND channelRef.current == null AND guardConditionExists == true AND websocketConnectionState == "TIMED_OUT"_
+    - _Expected_Behavior: For any component mount event where React's double-mounting behavior occurs, the fixed subscription logic SHALL establish and maintain a stable WebSocket connection that successfully receives broadcast messages_
+    - _Preservation: Toast notification display, fetchPumps refresh, cleanup behavior, early return logic, and console logging must remain unchanged_
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5_
+
+  - [ ] 3.2 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Stable WebSocket Subscription Despite Double-Mounting
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - Verify subscription status is "SUBSCRIBED" after double-mounting
+    - Verify channelRef.current is not null after second mount
+    - Verify broadcast messages are successfully received
+    - Verify no "TIMED_OUT" or "WebSocket is closed" errors in console
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+  - [ ] 3.3 Verify preservation tests still pass
+    - **Property 2: Preservation** - Broadcast Handling and Cleanup Behavior
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm toast notification still displays correctly when broadcast received
+    - Confirm fetchPumps() still called with correct parameters
+    - Confirm cleanup still works correctly on unmount
+    - Confirm early return still works when branch_id is missing
+    - Confirm console logging still provides debugging information
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+
+- [ ] 4. Checkpoint - Ensure all tests pass
+  - Run all unit tests for POS component
+  - Run all property-based tests for subscription logic
+  - Run integration tests for broadcast message flow
+  - Verify no console errors or warnings
+  - Verify subscription remains stable in development mode (React StrictMode)
+  - Verify subscription works correctly in production build
+  - If any issues arise, document them and ask the user for guidance
