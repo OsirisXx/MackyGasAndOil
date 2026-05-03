@@ -95,10 +95,38 @@ export default function POS() {
   const branchName = cashier?.branches?.name
   const autoShift = getCurrentShift(branchName)
   const shifts = getShiftsForBranch(branchName)
-  const [selectedShift, setSelectedShift] = useState(null) // null = not yet selected
-  const [shiftConfirmed, setShiftConfirmed] = useState(false) // gate for POS access
+  
+  // Persist shift selection in sessionStorage to survive re-renders
+  const [selectedShift, setSelectedShift] = useState(() => {
+    const saved = sessionStorage.getItem(`pos-selected-shift-${cashier?.id}`)
+    return saved ? parseInt(saved) : null
+  })
+  
+  const [shiftConfirmed, setShiftConfirmed] = useState(() => {
+    const saved = sessionStorage.getItem(`pos-shift-confirmed-${cashier?.id}`)
+    return saved === 'true'
+  })
+  
   const [showChangeShift, setShowChangeShift] = useState(false)
   const currentShiftDate = format(new Date(), 'yyyy-MM-dd')
+  
+  // Price update state - prevents shift selection gate from triggering during price updates
+  const [isPriceUpdateInProgress, setIsPriceUpdateInProgress] = useState(false)
+  const [showPriceChangeAlert, setShowPriceChangeAlert] = useState(false)
+  const [priceChanges, setPriceChanges] = useState([]) // Array of { pumpName, fuelType, oldPrice, newPrice }
+  
+  // Save shift selection to sessionStorage whenever it changes
+  useEffect(() => {
+    if (selectedShift !== null && cashier?.id) {
+      sessionStorage.setItem(`pos-selected-shift-${cashier.id}`, selectedShift.toString())
+    }
+  }, [selectedShift, cashier?.id])
+  
+  useEffect(() => {
+    if (cashier?.id) {
+      sessionStorage.setItem(`pos-shift-confirmed-${cashier.id}`, shiftConfirmed.toString())
+    }
+  }, [shiftConfirmed, cashier?.id])
 
   // Set branch to cashier's branch on mount
   useEffect(() => {
@@ -120,38 +148,81 @@ export default function POS() {
     }
   }, [cashier, selectedBranchId])
 
-  // Subscribe to pump price changes for real-time updates
+  // Simple polling for price changes - check every 30 seconds
+  const lastPricesRef = useRef({})
+  
   useEffect(() => {
     if (!cashier?.branch_id && !selectedBranchId) return
-
+    
     const branchId = cashier?.branch_id || selectedBranchId
-
-    const channel = supabase
-      .channel('pump_price_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'pumps',
-          filter: `branch_id=eq.${branchId}`
-        },
-        (payload) => {
-          console.log('Pump price updated:', payload)
-          // Refresh pumps to get new prices
-          fetchPumps(branchId)
-          toast.success('Pump prices updated', {
-            icon: '💰',
-            duration: 3000
+    
+    // Store initial prices
+    lastPricesRef.current = {}
+    pumps.forEach(p => {
+      lastPricesRef.current[p.id] = parseFloat(p.price_per_liter)
+    })
+    
+    console.log('[Price Polling] Starting price check every 30 seconds')
+    
+    const checkPrices = async () => {
+      console.log('[Price Polling] Checking for price changes...')
+      
+      // Fetch latest prices
+      const { data: latestPumps } = await supabase
+        .from('pumps')
+        .select('*')
+        .eq('branch_id', branchId)
+        .eq('is_active', true)
+      
+      if (!latestPumps) return
+      
+      const changes = []
+      
+      latestPumps.forEach(newPump => {
+        const oldPrice = lastPricesRef.current[newPump.id]
+        const newPrice = parseFloat(newPump.price_per_liter)
+        
+        if (oldPrice && oldPrice !== newPrice) {
+          changes.push({
+            pumpName: newPump.pump_name,
+            fuelType: newPump.fuel_type,
+            oldPrice: oldPrice,
+            newPrice: newPrice
           })
+          // Update stored price
+          lastPricesRef.current[newPump.id] = newPrice
         }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
+      })
+      
+      if (changes.length > 0) {
+        console.log('[Price Polling] Price changes detected:', changes)
+        
+        // Set flag to bypass shift selection gate
+        setIsPriceUpdateInProgress(true)
+        
+        // Update pump store
+        await fetchPumps(branchId)
+        
+        // Show alert
+        setPriceChanges(changes)
+        setShowPriceChangeAlert(true)
+        
+        // Clear flag
+        setTimeout(() => setIsPriceUpdateInProgress(false), 500)
+      }
     }
-  }, [cashier?.branch_id, selectedBranchId])
+    
+    // Check immediately on mount
+    checkPrices()
+    
+    // Then check every 30 seconds
+    const interval = setInterval(checkPrices, 30000)
+    
+    return () => {
+      console.log('[Price Polling] Stopping price check')
+      clearInterval(interval)
+    }
+  }, [cashier?.branch_id, selectedBranchId, pumps.length])
 
   // Fetch all unique customers from purchase_orders for autocomplete
   const fetchAllCustomers = async () => {
@@ -261,6 +332,10 @@ export default function POS() {
       return
     }
     if (!pumpId || !amount) return toast.error('Please fill all required fields')
+    if (selectedShift === null) {
+      toast.error('Please select a shift first')
+      return
+    }
     setSaving(true)
     try {
       // IMPORTANT: Ensure shift snapshots exist BEFORE recording the sale
@@ -309,6 +384,10 @@ export default function POS() {
     e.preventDefault()
     if (!isConnected) {
       toast.error('No connection. Please check your internet and try again.')
+      return
+    }
+    if (selectedShift === null) {
+      toast.error('Please select a shift first')
       return
     }
     // Validate based on mode
@@ -612,6 +691,10 @@ export default function POS() {
       return
     }
     if (cart.length === 0) return toast.error('Cart is empty')
+    if (selectedShift === null) {
+      toast.error('Please select a shift first')
+      return
+    }
     setSaving(true)
     try {
       // Insert each cart item as a product sale
@@ -625,6 +708,8 @@ export default function POS() {
         unit_price: item.product.price,
         total_amount: item.product.price * item.quantity,
         payment_method: productPaymentMethod,
+        shift_date: currentShiftDate,
+        shift_number: selectedShift,
       }))
       
       const { error } = await supabase.from('product_sales').insert(salesData)
@@ -709,7 +794,8 @@ export default function POS() {
   }
 
   // Shift Selection Gate — cashier must select shift before accessing POS
-  if (!shiftConfirmed || selectedShift === null) {
+  // Bypass gate during price updates to prevent cashier from being kicked out
+  if ((!shiftConfirmed || selectedShift === null) && !isPriceUpdateInProgress) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8">
@@ -809,6 +895,48 @@ export default function POS() {
             <button onClick={() => setShowChangeShift(false)}
               className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium transition-colors">
               Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Price Change Alert Modal */}
+      {showPriceChangeAlert && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
+                <span className="text-2xl">⚠️</span>
+              </div>
+              <h3 className="font-bold text-gray-800 text-lg">Price Update Alert</h3>
+            </div>
+            
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+              <p className="text-sm text-amber-800 font-medium mb-3">
+                The following pump prices have been updated:
+              </p>
+              <div className="space-y-2">
+                {priceChanges.map((change, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-gray-700">
+                      {change.pumpName} ({change.fuelType})
+                    </span>
+                    <span className="text-amber-700 font-bold">
+                      ₱{change.oldPrice.toFixed(2)} → ₱{change.newPrice.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <p className="text-xs text-gray-600 mb-4">
+              Please check the new prices before making sales. This is an informational alert only - you can continue working.
+            </p>
+            
+            <button
+              onClick={() => setShowPriceChangeAlert(false)}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm transition-colors">
+              Acknowledge & Continue
             </button>
           </div>
         </div>

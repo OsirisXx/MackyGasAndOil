@@ -112,8 +112,15 @@ export default function AccountabilityReport() {
       let delQ = supabase.from('fuel_deliveries').select('*, fuel_tanks(tank_name, fuel_type_id, fuel_types(name, short_code))').eq('delivery_date', reportDate)
       if (selectedBranchId) delQ = delQ.eq('branch_id', selectedBranchId)
 
+      // Fetch product sales with shift tracking
+      let prodSalesQ = supabase.from('product_sales').select('*').eq('shift_date', reportDate).eq('shift_number', selectedShift)
+      if (selectedBranchId) prodSalesQ = prodSalesQ.eq('branch_id', selectedBranchId)
+      
+      // Fetch all products to get categories
+      let productsQ = supabase.from('products').select('id, category')
+
       // Build all promises
-      const promises = [pumpsQ, salesQ, ciQ, depQ, withQ, chkQ, purQ, calQ, delQ]
+      const promises = [pumpsQ, salesQ, ciQ, depQ, withQ, chkQ, purQ, calQ, delQ, prodSalesQ, productsQ]
       if (afterShiftSalesQ) promises.push(afterShiftSalesQ, afterShiftPOsQ, afterShiftCalsQ)
 
       const results = await Promise.all(promises)
@@ -126,9 +133,11 @@ export default function AccountabilityReport() {
       const pur = results[6].data
       const cal = results[7].data
       const fuelDeliveries = results[8].data
-      const afterSales = results[9]?.data || []
-      const afterPOs = results[10]?.data || []
-      const afterCals = results[11]?.data || []
+      const productSalesData = results[9].data || []
+      const productsData = results[10].data || []
+      const afterSales = results[11]?.data || []
+      const afterPOs = results[12]?.data || []
+      const afterCals = results[13]?.data || []
 
       // Filter day's data by shift
       const filterByShift = (items) => {
@@ -215,6 +224,33 @@ export default function AccountabilityReport() {
       setWithdrawals(withdrawalsData || [])
       setChecks(chk || [])
       setPurchases(pur || [])
+      
+      // Create a map of product_id -> category for fast lookup
+      const productCategoryMap = {}
+      ;(productsData || []).forEach(product => {
+        productCategoryMap[product.id] = product.category
+      })
+      
+      // Calculate product sales totals by category
+      const categorizedSales = {
+        oil_lubes: 0,
+        accessories: 0,
+        services: 0,
+        miscellaneous: 0
+      }
+      
+      ;(productSalesData || []).forEach(sale => {
+        const amount = parseFloat(sale.total_amount || 0)
+        const category = productCategoryMap[sale.product_id] || 'miscellaneous'
+        
+        if (category in categorizedSales) {
+          categorizedSales[category] += amount
+        } else {
+          categorizedSales.miscellaneous += amount
+        }
+      })
+      
+      setProductSales(categorizedSales)
     } catch (err) {
       console.error('AccountabilityReport fetch error:', err)
     } finally {
@@ -568,10 +604,21 @@ export default function AccountabilityReport() {
         )}
 
         {/* Total Accountability */}
-        <div className="flex justify-end mb-6">
-          <div className="border-2 border-gray-800 px-6 py-3 bg-gray-50">
-            <span className="font-bold text-sm">TOTAL ACCOUNTABILITY: </span>
-            <span className="font-mono font-bold text-lg">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+        <div className="space-y-3 mb-6">
+          {/* Intended Total Sale - Gross total before deductions */}
+          <div className="flex justify-end">
+            <div className="border-2 border-blue-600 px-6 py-3 bg-blue-50">
+              <span className="font-bold text-sm text-blue-900">INTENDED TOTAL SALE: </span>
+              <span className="font-mono font-bold text-lg text-blue-900">₱{totalAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+            </div>
+          </div>
+          
+          {/* Net Accountability - After calibration deduction */}
+          <div className="flex justify-end">
+            <div className="border-2 border-gray-800 px-6 py-3 bg-gray-50">
+              <span className="font-bold text-sm">TOTAL ACCOUNTABILITY: </span>
+              <span className="font-mono font-bold text-lg">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+            </div>
           </div>
         </div>
 
@@ -787,6 +834,7 @@ export default function AccountabilityReport() {
           <div>
             <table className="w-full border-collapse text-xs">
               <tbody>
+                <tr className="bg-blue-50"><td className="border border-gray-300 p-2 font-bold text-blue-900">INTENDED TOTAL SALE:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold text-blue-900">₱{totalAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr className="bg-gray-50"><td className="border border-gray-300 p-2 font-bold">TOTAL ACCOUNTABILITY:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr><td className="border border-gray-300 p-2 font-medium text-gray-600">Less: D. Charge Invoices:</td><td className="border border-gray-300 p-2 text-right font-mono text-red-600">₱{totalChargeInvoices.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr><td className="border border-gray-300 p-2 font-medium text-gray-600">Less: E. Expenses:</td><td className="border border-gray-300 p-2 text-right font-mono text-red-600">₱{totalExpenses.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
