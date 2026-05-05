@@ -281,6 +281,7 @@ export default function AccountabilityReport() {
   const totalCashDeposit = depositsByType.vault_deposit
   const totalGcash = depositsByType.gcash
   const totalCashRegister = depositsByType.cash_register
+  const totalLubesDeposit = depositsByType.lubes_deposit
   const totalChecks = checks.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalExpenses = totalWithdrawals
   const totalPurchases = purchases.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
@@ -312,8 +313,8 @@ export default function AccountabilityReport() {
   // Total fuel includes calibration to show accurate pump reading
   const totalFuelSales = baseFuelSales + totalCalibrations
   
-  // Total accountability includes calibration, then we deduct it at the end
-  const totalAccountability = totalFuelSales + totalOilLubes + totalAccessories + totalServices + totalMiscellaneous
+  // Total accountability EXCLUDES oil/lubes (per client request - lubes should be separate)
+  const totalAccountability = totalFuelSales + totalAccessories + totalServices + totalMiscellaneous
   const netAccountability = totalAccountability - totalCalibrations
   const totalRemittance = totalCashDeposit + totalGcash + totalCashRegister + totalWithdrawals
   const expectedCash = netAccountability - totalChargeInvoices - totalExpenses - totalPurchases
@@ -605,20 +606,34 @@ export default function AccountabilityReport() {
 
         {/* Total Accountability */}
         <div className="space-y-3 mb-6">
-          {/* Intended Total Sale - Gross total before deductions */}
-          <div className="flex justify-end">
+          {/* Intended Total Sale - Gross total before deductions (EXCLUDES oil/lubes) */}
+          <div className="flex justify-end gap-4">
             <div className="border-2 border-blue-600 px-6 py-3 bg-blue-50">
               <span className="font-bold text-sm text-blue-900">INTENDED TOTAL SALE: </span>
               <span className="font-mono font-bold text-lg text-blue-900">₱{totalAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
             </div>
+            {/* Oil/Lubes Total - Separate from accountability */}
+            {totalOilLubes > 0 && (
+              <div className="border-2 border-green-600 px-6 py-3 bg-green-50">
+                <span className="font-bold text-sm text-green-900">TOTAL OIL/LUBES: </span>
+                <span className="font-mono font-bold text-lg text-green-900">₱{totalOilLubes.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+              </div>
+            )}
           </div>
           
-          {/* Net Accountability - After calibration deduction */}
-          <div className="flex justify-end">
+          {/* Net Accountability - After calibration deduction (EXCLUDES oil/lubes) */}
+          <div className="flex justify-end gap-4">
             <div className="border-2 border-gray-800 px-6 py-3 bg-gray-50">
               <span className="font-bold text-sm">TOTAL ACCOUNTABILITY: </span>
               <span className="font-mono font-bold text-lg">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
             </div>
+            {/* Placeholder to maintain alignment when oil/lubes is shown */}
+            {totalOilLubes > 0 && (
+              <div className="px-6 py-3 opacity-0 pointer-events-none">
+                <span className="font-bold text-sm">TOTAL OIL/LUBES: </span>
+                <span className="font-mono font-bold text-lg">₱{totalOilLubes.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -724,6 +739,39 @@ export default function AccountabilityReport() {
               </tr>
             </tbody>
           </table>
+
+          {/* Lubes Deposit */}
+          <p className="font-semibold text-xs mb-1 text-teal-700 mt-2">Lubes Deposit</p>
+          <table className="w-full border-collapse text-xs mb-2">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 p-2 text-left">#</th>
+                <th className="border border-gray-300 p-2 text-left">CASHIER</th>
+                <th className="border border-gray-300 p-2 text-right">AMOUNT</th>
+                <th className="border border-gray-300 p-2 text-left">NOTES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const lubesDeps = activeDeposits.filter(d => d.deposit_type === 'lubes_deposit')
+                return lubesDeps.length === 0 ? (
+                  <tr><td colSpan={4} className="border border-gray-300 p-2 text-center text-gray-400">No lubes deposits this shift</td></tr>
+                ) : lubesDeps.map((dep, idx) => (
+                  <tr key={dep.id}>
+                    <td className="border border-gray-300 p-2">{idx + 1}</td>
+                    <td className="border border-gray-300 p-2">{dep.cashiers?.full_name || '—'}</td>
+                    <td className="border border-gray-300 p-2 text-right font-mono">{parseFloat(dep.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td className="border border-gray-300 p-2 text-xs">{dep.notes || ''}</td>
+                  </tr>
+                ))
+              })()}
+              <tr className="bg-gray-50 font-bold">
+                <td colSpan={2} className="border border-gray-300 p-2 text-right">TOTAL LUBES DEPOSIT</td>
+                <td className="border border-gray-300 p-2 text-right font-mono">{depositsByType.lubes_deposit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td className="border border-gray-300 p-2"></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         {/* Vault Withdrawals */}
@@ -782,6 +830,10 @@ export default function AccountabilityReport() {
             <span className="font-medium">CASH REGISTER:</span>
             <span className="font-mono font-bold ml-2">{totalCashRegister.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
           </div>
+          <div className="border border-gray-300 px-3 py-2 text-sm bg-teal-50">
+            <span className="font-medium text-teal-700">LUBES DEPOSIT:</span>
+            <span className="font-mono font-bold ml-2 text-teal-700">{totalLubesDeposit.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+          </div>
         </div>
 
         {/* Checks */}
@@ -835,6 +887,9 @@ export default function AccountabilityReport() {
             <table className="w-full border-collapse text-xs">
               <tbody>
                 <tr className="bg-blue-50"><td className="border border-gray-300 p-2 font-bold text-blue-900">INTENDED TOTAL SALE:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold text-blue-900">₱{totalAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                {totalOilLubes > 0 && (
+                  <tr className="bg-green-50"><td className="border border-gray-300 p-2 font-bold text-green-900">TOTAL OIL/LUBES:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold text-green-900">₱{totalOilLubes.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
+                )}
                 <tr className="bg-gray-50"><td className="border border-gray-300 p-2 font-bold">TOTAL ACCOUNTABILITY:</td><td className="border border-gray-300 p-2 text-right font-mono font-bold">₱{netAccountability.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr><td className="border border-gray-300 p-2 font-medium text-gray-600">Less: D. Charge Invoices:</td><td className="border border-gray-300 p-2 text-right font-mono text-red-600">₱{totalChargeInvoices.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>
                 <tr><td className="border border-gray-300 p-2 font-medium text-gray-600">Less: E. Expenses:</td><td className="border border-gray-300 p-2 text-right font-mono text-red-600">₱{totalExpenses.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td></tr>

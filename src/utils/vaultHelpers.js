@@ -1,4 +1,4 @@
-import { Vault, DollarSign, Smartphone, Banknote } from 'lucide-react'
+import { Vault, DollarSign, Smartphone, Banknote, Droplet } from 'lucide-react'
 
 /**
  * Vault tab configuration for the POS vault modal
@@ -8,6 +8,7 @@ export const VAULT_TABS = [
   { key: 'withdraw', label: 'Cash Out', icon: DollarSign, color: 'orange' },
   { key: 'gcash', label: 'GCash', icon: Smartphone, color: 'green' },
   { key: 'cash_register', label: 'Cash Reg', icon: Banknote, color: 'purple' },
+  { key: 'lubes_deposit', label: 'Lubes Deposit', icon: Droplet, color: 'teal' },
 ]
 
 /**
@@ -20,6 +21,7 @@ export function getDepositTypeLabel(depositType) {
     vault_deposit: 'Vault Deposit',
     gcash: 'GCash',
     cash_register: 'Cash Register',
+    lubes_deposit: 'Lubes Deposit',
   }
   return labels[depositType] || 'Vault Deposit' // null defaults to Vault Deposit
 }
@@ -37,10 +39,10 @@ export function getUnitTypeLabel(unitType) {
 /**
  * Group deposits by type and sum amounts
  * @param {Array} deposits - Array of deposit records
- * @returns {Object} { vault_deposit: number, gcash: number, cash_register: number }
+ * @returns {Object} { vault_deposit: number, gcash: number, cash_register: number, lubes_deposit: number }
  */
 export function groupDepositsByType(deposits) {
-  const groups = { vault_deposit: 0, gcash: 0, cash_register: 0 }
+  const groups = { vault_deposit: 0, gcash: 0, cash_register: 0, lubes_deposit: 0 }
   ;(deposits || []).forEach(d => {
     const type = d.deposit_type || 'vault_deposit' // null treated as vault_deposit
     if (groups[type] !== undefined) {
