@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useBranchStore } from '../stores/branchStore'
 import { format } from 'date-fns'
@@ -6,6 +6,7 @@ import { Vault, Calendar, Filter, Edit2, Trash2, Save, X, Search, DollarSign, Re
 import toast from 'react-hot-toast'
 import { logAudit } from '../stores/auditStore'
 import { getDepositTypeLabel } from '../utils/vaultHelpers'
+import { getShiftsForBranch } from '../utils/shiftConfig'
 
 export default function CashDeposits() {
   const { branches, selectedBranchId } = useBranchStore()
@@ -22,10 +23,85 @@ export default function CashDeposits() {
   const [selectedType, setSelectedType] = useState('')
   const [showDeleted, setShowDeleted] = useState(false)
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [selectedShift, setSelectedShift] = useState('all')
   const [createForm, setCreateForm] = useState({
     cashier_id: '', amount: '', deposit_type: 'vault_deposit', notes: '',
     deposit_date: format(new Date(), "yyyy-MM-dd'T'HH:mm")
   })
+
+  // Utility function: Parse shift time string to hour and minute
+  const parseShiftTime = (timeStr) => {
+    const [time, period] = timeStr.split(' ')
+    let [hours, minutes] = time.split(':').map(Number)
+    
+    // Convert to 24-hour format
+    if (period === 'PM' && hours !== 12) {
+      hours += 12
+    }
+    if (period === 'AM' && hours === 12) {
+      hours = 0
+    }
+    
+    return { startHour: hours, startMinute: minutes }
+  }
+
+  // Utility function: Check if a deposit timestamp falls within a shift's time range
+  const isDepositInShift = (depositTimestamp, shift, selectedDate) => {
+    try {
+      // Convert UTC timestamp to local Date object
+      const depositDate = new Date(depositTimestamp)
+      if (isNaN(depositDate.getTime())) {
+        console.error('Invalid deposit timestamp:', depositTimestamp)
+        return false
+      }
+      
+      // Parse selected date
+      const [year, month, day] = selectedDate.split('-').map(Number)
+      
+      // Parse shift times
+      const { startHour, startMinute } = parseShiftTime(shift.startTime)
+      const { startHour: endHour, startMinute: endMinute } = parseShiftTime(shift.endTime)
+      
+      // Create shift boundary timestamps
+      const shiftStart = new Date(year, month - 1, day, startHour, startMinute, 0, 0)
+      let shiftEnd = new Date(year, month - 1, day, endHour, endMinute, 0, 0)
+      
+      // Handle midnight crossing: if end time < start time, shift crosses midnight
+      if (endHour < startHour || (endHour === startHour && endMinute < startMinute)) {
+        // Shift ends on the next day
+        shiftEnd = new Date(year, month - 1, day + 1, endHour, endMinute, 0, 0)
+      }
+      
+      // Check if deposit falls within shift range
+      return depositDate >= shiftStart && depositDate < shiftEnd
+    } catch (error) {
+      console.error('Error parsing deposit timestamp:', error)
+      return false
+    }
+  }
+
+  // Utility function: Filter deposits by shift
+  const filterDepositsByShift = (deposits, shiftNumber, selectedDate, selectedBranch) => {
+    const shifts = getShiftsForBranch(selectedBranch?.name)
+    const shift = shifts.find(s => s.number === parseInt(shiftNumber))
+    
+    if (!shift) {
+      console.warn(`Shift ${shiftNumber} not found for branch ${selectedBranch?.name}`)
+      return deposits // Return unfiltered if shift not found
+    }
+    
+    return deposits.filter(deposit => {
+      return isDepositInShift(deposit.deposit_date, shift, selectedDate)
+    })
+  }
+
+  // Compute filtered deposits based on selected shift
+  const filteredDeposits = useMemo(() => {
+    if (selectedShift === 'all') return deposits
+    
+    const selectedBranch = branches.find(b => b.id === selectedBranchId)
+    return filterDepositsByShift(deposits, selectedShift, selectedDate, selectedBranch)
+  }, [deposits, selectedShift, selectedDate, selectedBranchId, branches])
 
   useEffect(() => {
     fetchCashiers()
@@ -119,10 +195,15 @@ export default function CashDeposits() {
 
   const handleEdit = (deposit) => {
     setEditingId(deposit.id)
+    // Convert UTC timestamp to local datetime string for the input field
+    const depositDate = new Date(deposit.deposit_date)
+    // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+    const localDateTimeString = format(depositDate, "yyyy-MM-dd'T'HH:mm")
+    
     setEditForm({
       amount: deposit.amount,
       notes: deposit.notes || '',
-      deposit_date: format(new Date(deposit.deposit_date), "yyyy-MM-dd'T'HH:mm")
+      deposit_date: localDateTimeString
     })
   }
 
@@ -137,12 +218,15 @@ export default function CashDeposits() {
     }
     setSaving(true)
     try {
+      // Convert the local datetime string to ISO format (UTC)
+      const depositDateISO = new Date(editForm.deposit_date).toISOString()
+      
       const { error } = await supabase
         .from('cash_deposits')
         .update({
           amount: parseFloat(editForm.amount),
           notes: editForm.notes || null,
-          deposit_date: editForm.deposit_date,
+          deposit_date: depositDateISO,
           updated_at: new Date().toISOString()
         })
         .eq('id', id)
@@ -238,7 +322,7 @@ export default function CashDeposits() {
     }
   }
 
-  const totalDeposits = deposits.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0)
+  const totalDeposits = filteredDeposits.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0)
   const totalWithdrawals = withdrawals.reduce((sum, w) => sum + parseFloat(w.amount || 0), 0)
   const netVaultBalance = totalDeposits - totalWithdrawals
 
@@ -258,7 +342,7 @@ export default function CashDeposits() {
           <Filter size={16} className="text-gray-400" />
           <h2 className="text-sm font-semibold text-gray-700">Filters</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
             <div className="relative">
@@ -313,6 +397,19 @@ export default function CashDeposits() {
               <option value="cash_register">Cash Register</option>
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Shift</label>
+            <select
+              value={selectedShift}
+              onChange={(e) => setSelectedShift(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="all">All Shifts</option>
+              <option value="1">1st Shift</option>
+              <option value="2">2nd Shift</option>
+              <option value="3">3rd Shift</option>
+            </select>
+          </div>
         </div>
         <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
@@ -342,7 +439,7 @@ export default function CashDeposits() {
             <div className="p-2 bg-white/20 rounded-lg">
               <Vault size={20} />
             </div>
-            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">{deposits.length}</span>
+            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">{filteredDeposits.length}</span>
           </div>
           <p className="text-blue-100 text-xs mb-1">Total Deposits</p>
           <p className="text-2xl font-bold">₱{totalDeposits.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
@@ -383,7 +480,7 @@ export default function CashDeposits() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-500">Deposits</span>
-              <span className="font-semibold text-blue-600">{deposits.length}</span>
+              <span className="font-semibold text-blue-600">{filteredDeposits.length}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-500">Withdrawals</span>
@@ -391,7 +488,7 @@ export default function CashDeposits() {
             </div>
             <div className="flex items-center justify-between text-xs pt-2 border-t">
               <span className="text-gray-700 font-medium">Total</span>
-              <span className="font-bold text-gray-800">{deposits.length + withdrawals.length}</span>
+              <span className="font-bold text-gray-800">{filteredDeposits.length + withdrawals.length}</span>
             </div>
           </div>
         </div>
@@ -408,7 +505,7 @@ export default function CashDeposits() {
                 : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
             }`}
           >
-            Deposits ({deposits.length})
+            Deposits ({filteredDeposits.length})
           </button>
           <button
             onClick={() => setActiveTab('withdrawals')}
@@ -446,14 +543,16 @@ export default function CashDeposits() {
                       Loading deposits...
                     </td>
                   </tr>
-                ) : deposits.length === 0 ? (
+                ) : filteredDeposits.length === 0 ? (
                   <tr>
                     <td colSpan="7" className="px-4 py-8 text-center text-sm text-gray-400">
-                      No deposits found for the selected filters
+                      {selectedShift !== 'all' 
+                        ? `No deposits found for the selected shift and filters`
+                        : 'No deposits found for the selected filters'}
                     </td>
                   </tr>
                 ) : (
-                  deposits.map(deposit => (
+                  filteredDeposits.map(deposit => (
                   <tr key={deposit.id} className={`hover:bg-gray-50 ${deposit.deleted_at ? 'opacity-50 bg-red-50' : ''}`}>
                     {editingId === deposit.id ? (
                       <>
